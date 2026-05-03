@@ -58,6 +58,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "error_only": False,
         "channels": [],
     },
+    "web": {
+        "host": "127.0.0.1",
+        "port": 5890,
+        "password": "",
+    },
 }
 
 
@@ -136,6 +141,10 @@ def normalize_config(config: dict[str, Any]) -> None:
     push["channels"] = normalize_push_channels(push)
     push["enable"] = any(channel.get("enable") for channel in push["channels"])
     push["error_only"] = bool(push.get("error_only", False))
+    web = config.setdefault("web", {})
+    web.setdefault("host", "127.0.0.1")
+    web.setdefault("port", 5890)
+    web.setdefault("password", "")
 
 
 def normalize_push_channels(push: dict[str, Any]) -> list[dict[str, Any]]:

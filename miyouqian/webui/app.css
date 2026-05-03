@@ -822,3 +822,72 @@ textarea:focus {
     transform: rotate(360deg);
   }
 }
+
+/* 密码认证页 */
+.auth-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+.auth-card {
+  width: min(400px, calc(100% - 32px));
+  padding: 32px 28px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  text-align: center;
+}
+
+.auth-card .brand-mark {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 20px;
+}
+
+.auth-card .brand-mark img {
+  width: 60px;
+  height: 60px;
+}
+
+.auth-card h2 {
+  margin: 0 0 6px;
+  font-size: 22px;
+}
+
+.auth-card .auth-subtitle {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 0 0 24px;
+}
+
+.auth-card input {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 15px;
+  margin-bottom: 16px;
+  text-align: center;
+  letter-spacing: 2px;
+}
+
+.auth-card input:focus {
+  border-color: var(--primary);
+}
+
+.auth-card button {
+  width: 100%;
+  min-height: 44px;
+  font-size: 15px;
+}
+
+.auth-card .auth-error {
+  color: var(--danger);
+  font-size: 13px;
+  margin-top: 12px;
+  min-height: 20px;
+}

@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import base64
 import copy
+import hashlib
 import io
 import json
 import mimetypes
 import pathlib
+import secrets
 import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -27,17 +29,103 @@ from .scheduler import DailyScheduler
 
 WEB_ROOT = pathlib.Path(__file__).resolve().parents[1] / "webui"
 
+# ---------------------------------------------------------------------------
+# 密码认证工具
+# ---------------------------------------------------------------------------
+AUTH_COOKIE = "myq_token"
+
+
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+def is_hashed_password(value: str) -> bool:
+    return len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+
+
+def check_password(password: str, stored_hash: str) -> bool:
+    if not stored_hash:
+        return False
+    return secrets.compare_digest(hash_password(password), stored_hash)
+
+
+def is_external_host(host: str) -> bool:
+    return host not in ("127.0.0.1", "localhost", "::1")
+
 
 class WebApp:
     def __init__(self, config_path: pathlib.Path) -> None:
         self.config_path = config_path
         self.config = load_config(config_path)
+        self._ensure_password_hashed()
         self.log_file = log_path(config_path, self.config)
         configure_logger(self.log_file)
         self.lock = threading.RLock()
         self.logs: list[str] = []
         self.login_state: dict[str, Any] = {"running": False, "status": "idle"}
         self.scheduler = DailyScheduler(self.config, self.run_all, lambda message: self.log(message, "scheduler"))
+        self._sessions: dict[str, float] = {}
+
+    def _ensure_password_hashed(self) -> None:
+        web = self.config.get("web", {})
+        password = str(web.get("password", ""))
+        if password and not is_hashed_password(password):
+            web["password"] = hash_password(password)
+            save_config(self.config_path, self.config)
+
+    @property
+    def need_auth(self) -> bool:
+        web = self.config.get("web", {})
+        return is_external_host(str(web.get("host", "127.0.0.1")))
+
+    @property
+    def password_is_set(self) -> bool:
+        return bool(self.config.get("web", {}).get("password", ""))
+
+    def _create_session(self) -> str:
+        token = secrets.token_hex(32)
+        with self.lock:
+            self._sessions[token] = True
+        return token
+
+    def _check_session(self, token: str) -> bool:
+        if not token:
+            return False
+        with self.lock:
+            return token in self._sessions
+
+    def _revoke_session(self, token: str) -> None:
+        with self.lock:
+            self._sessions.pop(token, None)
+
+    def auth_setup(self, password: str) -> str:
+        if not self.need_auth:
+            raise ValueError("当前为内网模式，无需设置密码")
+        if self.password_is_set:
+            raise ValueError("密码已设置，不能重复设置")
+        if len(password) < 4:
+            raise ValueError("密码长度至少 4 位")
+        with self.lock:
+            self.config.setdefault("web", {})["password"] = hash_password(password)
+            save_config(self.config_path, self.config)
+        self.log("已设置外网访问密码", "auth")
+        return self._create_session()
+
+    def auth_login(self, password: str) -> str:
+        if not self.need_auth:
+            raise ValueError("当前为内网模式，无需登录")
+        stored_hash = self.config.get("web", {}).get("password", "")
+        if not stored_hash:
+            raise ValueError("密码未设置，请先设置密码")
+        if not check_password(password, stored_hash):
+            raise ValueError("密码错误")
+        return self._create_session()
+
+    def auth_status(self) -> dict[str, Any]:
+        return {
+            "need_auth": self.need_auth,
+            "password_set": self.password_is_set,
+        }
 
     def start(self) -> None:
         self.scheduler.start()
@@ -388,9 +476,29 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
         return
 
+    def _get_cookie(self, name: str) -> str:
+        cookie_header = self.headers.get("Cookie", "")
+        for part in cookie_header.split(";"):
+            part = part.strip()
+            if part.startswith(f"{name}="):
+                return part[len(name) + 1:]
+        return ""
+
+    def _is_authenticated(self) -> bool:
+        if not self.app.need_auth:
+            return True
+        token = self._get_cookie(AUTH_COOKIE)
+        return self.app._check_session(token)
+
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         try:
+            if path == "/api/auth/status":
+                self.send_json(self.app.auth_status())
+                return
+            if not self._is_authenticated() and path.startswith("/api/"):
+                self.send_error_json("未登录", HTTPStatus.UNAUTHORIZED)
+                return
             if path == "/api/config":
                 self.send_json(self.app.get_config())
                 return
@@ -405,6 +513,17 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             payload = self.read_json()
+            if path == "/api/auth/setup":
+                token = self.app.auth_setup(str(payload.get("password", "")))
+                self.send_json({"ok": True}, set_cookie=token)
+                return
+            if path == "/api/auth/login":
+                token = self.app.auth_login(str(payload.get("password", "")))
+                self.send_json({"ok": True}, set_cookie=token)
+                return
+            if not self._is_authenticated():
+                self.send_error_json("未登录", HTTPStatus.UNAUTHORIZED)
+                return
             if path == "/api/config":
                 self.app.set_config(payload)
                 self.send_json({"ok": True})
@@ -462,12 +581,14 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("请求体必须是 JSON 对象")
         return data
 
-    def send_json(self, data: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
+    def send_json(self, data: dict[str, Any], status: HTTPStatus = HTTPStatus.OK, set_cookie: str = "") -> None:
         raw = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(raw)))
+        if set_cookie:
+            self.send_header("Set-Cookie", f"{AUTH_COOKIE}={set_cookie}; Path=/; HttpOnly; SameSite=Strict")
         self.end_headers()
         self.wfile.write(raw)
 
@@ -480,6 +601,8 @@ def serve(config_path: pathlib.Path, host: str, port: int) -> None:
     Handler.app = app
     print_startup_banner("MYQ")
     app.log(f"正在启动 Web 控制台，配置文件: {config_path.resolve()}", "startup")
+    if app.need_auth and not app.password_is_set:
+        app.log("外网模式已启用，首次访问时请设置访问密码", "auth")
     server, actual_port = create_server(host, port)
     if actual_port != port:
         app.log(f"端口 {port} 被占用，已切换到 {actual_port}", "startup")

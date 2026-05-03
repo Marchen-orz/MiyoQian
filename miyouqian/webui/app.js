@@ -34,7 +34,9 @@ async function api(path, options = {}) {
   });
   const data = await response.json();
   if (!response.ok) {
-    throw new Error(data.error || "请求失败");
+    const error = new Error(data.error || "请求失败");
+    error.status = response.status;
+    throw error;
   }
   return data;
 }
@@ -811,7 +813,113 @@ function bindEvents() {
 }
 
 bindEvents();
-loadConfig()
-  .then(refreshStatus)
-  .catch((error) => showToast(error.message));
-setInterval(() => refreshStatus().catch(() => {}), 3000);
+
+// ---------------------------------------------------------------------------
+// 认证流程
+// ---------------------------------------------------------------------------
+function isAuthError(error) {
+  return error?.message === "未登录" || error?.status === 401;
+}
+
+async function checkAuthAndInit() {
+  try {
+    const authStatus = await api("/api/auth/status");
+    if (!authStatus.need_auth) {
+      startApp();
+      return;
+    }
+    // 需要认证时，先试探一个受保护接口判断 session 是否仍然有效
+    try {
+      await api("/api/config");
+      startApp();
+    } catch {
+      showAuthPage(authStatus.password_set);
+    }
+  } catch {
+    startApp();
+  }
+}
+
+function showAuthPage(passwordSet) {
+  const shell = document.querySelector(".shell");
+  shell.style.display = "none";
+
+  const subtitle = passwordSet ? "请输入访问密码" : "首次使用，请设置访问密码";
+  const buttonText = passwordSet ? "登录" : "设置密码";
+  const inputPlaceholder = passwordSet ? "输入密码" : "设置密码（至少 4 位）";
+
+  const overlay = document.createElement("div");
+  overlay.className = "auth-overlay";
+  overlay.id = "authOverlay";
+  overlay.innerHTML = `
+    <div class="auth-card">
+      <span class="brand-mark">
+        <img src="/assets/myq_logo_clip.png" alt="米游签" />
+      </span>
+      <h2>米游签</h2>
+      <p class="auth-subtitle">${subtitle}</p>
+      <input id="authPassword" type="password" placeholder="${inputPlaceholder}" autocomplete="current-password" />
+      <button class="primary" id="authSubmit" type="button">${buttonText}</button>
+      <p class="auth-error" id="authError"></p>
+    </div>
+  `;
+  document.body.insertBefore(overlay, document.querySelector(".toast"));
+
+  const passwordInput = document.getElementById("authPassword");
+  const submitBtn = document.getElementById("authSubmit");
+  const errorEl = document.getElementById("authError");
+
+  const submit = async () => {
+    const password = passwordInput.value.trim();
+    if (!password) {
+      errorEl.textContent = "请输入密码";
+      return;
+    }
+    if (!passwordSet && password.length < 4) {
+      errorEl.textContent = "密码至少 4 位";
+      return;
+    }
+    submitBtn.disabled = true;
+    errorEl.textContent = "";
+    try {
+      const endpoint = passwordSet ? "/api/auth/login" : "/api/auth/setup";
+      await api(endpoint, {
+        method: "POST",
+        body: JSON.stringify({ password }),
+      });
+      overlay.remove();
+      shell.style.display = "";
+      startApp();
+    } catch (error) {
+      errorEl.textContent = error.message || "操作失败";
+      submitBtn.disabled = false;
+    }
+  };
+
+  submitBtn.addEventListener("click", submit);
+  passwordInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submit();
+  });
+  passwordInput.focus();
+}
+
+function startApp() {
+  loadConfig()
+    .then(refreshStatus)
+    .catch((error) => {
+      if (isAuthError(error)) {
+        checkAuthAndInit();
+        return;
+      }
+      showToast(error.message);
+    });
+  setInterval(() => {
+    refreshStatus().catch((error) => {
+      if (isAuthError(error)) {
+        checkAuthAndInit();
+      }
+    });
+  }, 3000);
+}
+
+checkAuthAndInit();

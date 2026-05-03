@@ -44,8 +44,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--game", action="append", help="只执行指定游戏，可重复传入")
 
     serve_parser = subparsers.add_parser("serve", help="启动常驻 Web 控制台和每日调度器")
-    serve_parser.add_argument("--host", default="127.0.0.1", help="监听地址，默认 127.0.0.1")
-    serve_parser.add_argument("--port", type=int, default=5890, help="监听端口，默认 5890")
+    serve_parser.add_argument("--host", default=None, help="监听地址，默认读取配置文件")
+    serve_parser.add_argument("--port", type=int, default=None, help="监听端口，默认读取配置文件")
 
     subparsers.add_parser("show", help="显示当前启用配置摘要")
     return parser
@@ -131,10 +131,14 @@ def command_run(
     return 0
 
 
-def command_serve(config_path: pathlib.Path, host: str, port: int) -> int:
+def command_serve(config_path: pathlib.Path, host: str | None, port: int | None) -> int:
     from .service.web import serve
 
-    serve(config_path, host, port)
+    config = load_config(config_path)
+    web = config.get("web", {})
+    effective_host = host or str(web.get("host", "127.0.0.1"))
+    effective_port = port or int(web.get("port", 5890))
+    serve(config_path, effective_host, effective_port)
     return 0
 
 
@@ -155,6 +159,8 @@ def command_show(config_path: pathlib.Path) -> int:
     )
     print(f"凭证文件: {credentials_path(config_path, config).resolve()}")
     print(f"日志文件: {log_path(config_path, config).resolve()}")
+    web = config.get("web", {})
+    print(f"Web 控制台: {web.get('host', '127.0.0.1')}:{web.get('port', 5890)}")
     return 0
 
 
