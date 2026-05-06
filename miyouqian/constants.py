@@ -34,6 +34,8 @@ BBS_POST_LIST_URL = f"{BBS_API}/post/api/getForumPostList"
 BBS_DETAIL_URL = f"{BBS_API}/post/api/getPostFull"
 BBS_SHARE_URL = f"{BBS_API}/apihub/api/getShareConf"
 BBS_LIKE_URL = f"{BBS_API}/apihub/sapi/upvotePost"
+BBS_CREATE_VERIFICATION_URL = f"{BBS_API}/misc/api/createVerification?is_high=true"
+BBS_VERIFY_VERIFICATION_URL = f"{BBS_API}/misc/api/verifyVerification"
 
 QRCODE_FETCH_URL = "https://hk4e-sdk.mihoyo.com/hk4e_cn/combo/panda/qrcode/fetch"
 QRCODE_QUERY_URL = "https://hk4e-sdk.mihoyo.com/hk4e_cn/combo/panda/qrcode/query"

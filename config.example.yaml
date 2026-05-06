@@ -33,6 +33,14 @@ features:
   game_checkin: true
   bbs_tasks: false
 
+captcha:
+  max_retries: 3
+  channels:
+    - provider: damagou
+      enable: false
+      userkey: ""   # 打码狗 userkey
+      timeout: 60
+
 schedule:
   enable: false
   time: "09:00"
@@ -40,7 +48,7 @@ schedule:
   run_on_start: false
 
 web:
-  host: "0.0.0.0"   # 监听地址，默认仅本机访问；设为 "0.0.0.0" 允许外网访问
+  host: "127.0.0.1"   # 监听地址，默认仅本机访问；设为 "0.0.0.0" 允许外网访问
   port: 5890          # 监听端口
   password: ""        # 外网访问密码（仅 host 非 127.0.0.1 时生效）
                       # 留空表示未设置，首次通过页面设置；密码哈希会自动保存到此字段

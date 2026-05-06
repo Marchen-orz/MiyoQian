@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 from .. import constants as c
 from ..auth.login import refresh_cookie_token
-from ..core import crypto
+from ..core import captcha, crypto
 from ..core.http import ApiClient
 
 
@@ -105,7 +105,22 @@ class GameCheckin:
                 continue
             sign_data = result.get("data") or {}
             if sign_data.get("success") == 1:
-                self._add(messages, f"{nickname}({uid}) 触发验证码，本次跳过")
+                result = self._retry_captcha_sign(messages, game, role, result)
+                if result.get("retcode") == -5003:
+                    reward = describe_award(awards, day_index)
+                    self._add(messages, f"{nickname}({uid}) 今日已签到，奖励 {reward}")
+                    success.append(f"{label} 已签到 {reward}")
+                    continue
+                if result.get("retcode") == 0 and (result.get("data") or {}).get("success") != 1:
+                    reward = describe_award(awards, day_index + 1)
+                    self._add(messages, f"{nickname}({uid}) 签到成功，奖励 {reward}")
+                    success.append(f"{label} {reward}")
+                    continue
+                if not captcha.is_enabled(self.config):
+                    self._add(messages, f"{nickname}({uid}) 触发验证码，本次跳过")
+                else:
+                    reason = f"{result.get('message')}({result.get('retcode')})"
+                    self._add(messages, f"{nickname}({uid}) 验证码处理后仍失败: {reason}")
                 failed.append(f"{label} 触发验证码")
                 continue
             reward = describe_award(awards, day_index + 1)
@@ -173,7 +188,21 @@ class GameCheckin:
         )
         return data.get("data", {}) if data.get("retcode") == 0 else {}
 
-    def _sign(self, game: dict[str, Any], role: dict[str, Any]) -> dict[str, Any]:
+    def _sign(
+        self,
+        game: dict[str, Any],
+        role: dict[str, Any],
+        solution: captcha.CaptchaSolution | None = None,
+    ) -> dict[str, Any]:
+        headers = self._headers(game)
+        if solution:
+            headers.update(
+                {
+                    "x-rpc-challenge": solution.challenge,
+                    "x-rpc-validate": solution.validate,
+                    "x-rpc-seccode": f"{solution.validate}|jordan",
+                }
+            )
         return self.client.post_json(
             game["sign_url"],
             json={
@@ -181,8 +210,56 @@ class GameCheckin:
                 "region": role.get("region"),
                 "uid": role.get("game_uid"),
             },
-            headers=self._headers(game),
+            headers=headers,
         )
+
+    def _solve_captcha(
+        self,
+        messages: list[str],
+        sign_data: dict[str, Any],
+        attempt: int,
+        max_retries: int,
+    ) -> captcha.CaptchaSolution | None:
+        gt = str(sign_data.get("gt") or "")
+        challenge = str(sign_data.get("challenge") or "")
+        if not gt or not challenge:
+            return None
+        if not captcha.is_enabled(self.config):
+            return None
+        provider = captcha.active_provider_label(self.config)
+        self._add(messages, f"游戏签到触发验证码，正在调用{provider}识别({attempt}/{max_retries})")
+        solution = captcha.solve_game_captcha(self.client, self.config, gt, challenge, self.emit)
+        if not solution:
+            self._add(messages, "游戏签到验证码识别失败，准备重新获取验证码")
+        return solution
+
+    def _retry_captcha_sign(
+        self,
+        messages: list[str],
+        game: dict[str, Any],
+        role: dict[str, Any],
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not captcha.is_enabled(self.config):
+            return result
+        max_retries = captcha_max_retries(self.config)
+        current = result
+        for attempt in range(1, max_retries + 1):
+            sign_data = current.get("data") or {}
+            solution = self._solve_captcha(messages, sign_data, attempt, max_retries)
+            if not solution:
+                current = self._sign(game, role)
+                continue
+            self._add(messages, "游戏签到验证码已处理，正在重试签到")
+            current = self._sign(game, role, solution)
+            if current.get("retcode") == -5003:
+                return current
+            if current.get("retcode") == 0 and (current.get("data") or {}).get("success") != 1:
+                return current
+            if attempt < max_retries:
+                self._add(messages, "游戏签到验证码提交失败，准备重新获取验证码")
+                current = self._sign(game, role)
+        return current
 
 
 def describe_award(awards: list[dict[str, Any]], index: int) -> str:
@@ -200,3 +277,10 @@ def sleep_by_config(config: dict[str, Any]) -> None:
     except (TypeError, ValueError, IndexError):
         low, high = 1, 3
     time.sleep(random.uniform(max(low, 0), max(high, low)))
+
+
+def captcha_max_retries(config: dict[str, Any]) -> int:
+    try:
+        return max(int(config.get("captcha", {}).get("max_retries") or 3), 1)
+    except (TypeError, ValueError):
+        return 3

@@ -173,6 +173,23 @@
             <div class="push-channel-list" id="pushChannels"></div>
           </details>
 
+          <details class="panel">
+            <summary>
+              <span>
+                <strong>验证码识别</strong>
+                <small>默认关闭，启用请配置打码平台</small>
+              </span>
+              <span class="disclosure" aria-hidden="true"></span>
+            </summary>
+            <div class="form-grid compact">
+              <label>
+                <span>重试次数</span>
+                <input id="captchaMaxRetries" type="number" min="1" max="10" step="1" data-autosave />
+              </label>
+            </div>
+            <div class="push-channel-list" id="captchaChannels"></div>
+          </details>
+
         </div>
 
         <aside class="side-column">

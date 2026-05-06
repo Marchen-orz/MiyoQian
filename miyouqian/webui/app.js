@@ -15,6 +15,10 @@ const pushChannelOptions = [
   ["email", "邮箱"],
 ];
 
+const captchaChannelOptions = [
+  ["damagou", "打码狗(成本0.01元/次)"],
+];
+
 let config = null;
 let toastTimer = null;
 let autoSaveTimer = null;
@@ -23,6 +27,7 @@ let lastLoginStatus = "";
 let activeLoginIndex = null;
 let editingAccountIndex = null;
 let editingPushProviders = new Set();
+let editingCaptchaProviders = new Set();
 let logsPinnedToBottom = true;
 
 const $ = (id) => document.getElementById(id);
@@ -69,9 +74,10 @@ function renderConfig() {
   $("bbsShare").checked = Boolean(config.bbs?.share ?? true);
 
   $("pushErrorOnly").checked = Boolean(config.push?.error_only ?? false);
-
+  $("captchaMaxRetries").value = config.captcha?.max_retries ?? 3;
   renderGames();
   renderPushChannels();
+  renderCaptchaChannels();
   updateTaskDependencyState();
   renderAccounts();
 }
@@ -257,30 +263,14 @@ function pushChannelFields(provider, channel) {
 
 function pushChannelHiddenFields(channel) {
   if (!channel) return "";
-  return Object.entries(channel)
+  return Object.entries(cleanPushChannel(channel))
     .filter(([key]) => key !== "provider" && key !== "enable")
     .map(([key, value]) => `<input data-push-field="${key}" type="hidden" value="${escapeAttr(value ?? "")}" />`)
     .join("");
 }
 
 function emptyPushChannel(provider) {
-  return {
-    provider,
-    enable: true,
-    token: "",
-    webhook: "",
-    api_url: "",
-    topic: "",
-    chat_id: "",
-    secret: "",
-    smtp_host: "",
-    smtp_port: 465,
-    smtp_user: "",
-    smtp_password: "",
-    mail_from: "",
-    mail_to: "",
-    smtp_ssl: true,
-  };
+  return cleanPushChannel({ provider, enable: true });
 }
 
 function upsertPushChannel(channel) {
@@ -314,6 +304,184 @@ function hasPushChannelConfig(channel) {
     "mail_to",
   ];
   return configKeys.some((key) => String(channel[key] || "").trim());
+}
+
+function pushChannelFieldNames(provider) {
+  const fields = {
+    pushplus: ["token", "topic", "api_url"],
+    telegram: ["token", "chat_id", "api_url"],
+    dingrobot: ["webhook", "secret"],
+    feishubot: ["webhook"],
+    email: ["smtp_host", "smtp_port", "smtp_user", "smtp_password", "mail_from", "mail_to", "smtp_ssl"],
+  };
+  return fields[provider] || [];
+}
+
+function cleanPushChannel(channel) {
+  const provider = channel.provider;
+  const cleaned = {
+    provider,
+    enable: Boolean(channel.enable),
+  };
+  pushChannelFieldNames(provider).forEach((key) => {
+    if (key === "smtp_port") {
+      cleaned[key] = Number(channel[key] || 465);
+    } else if (key === "smtp_ssl") {
+      cleaned[key] = channel[key] === undefined ? true : Boolean(channel[key]);
+    } else {
+      cleaned[key] = String(channel[key] || "").trim();
+    }
+  });
+  return cleaned;
+}
+
+function shouldSavePushChannel(channel) {
+  if (channel.enable) return true;
+  return pushChannelFieldNames(channel.provider).some((key) => {
+    if (key === "smtp_ssl") return false;
+    if (key === "smtp_port") return Number(channel[key] || 465) !== 465;
+    return String(channel[key] || "").trim();
+  });
+}
+
+function renderCaptchaChannels() {
+  const channels = config.captcha?.channels || [];
+  const byProvider = new Map(channels.map((channel) => [channel.provider, channel]));
+  $("captchaChannels").innerHTML = captchaChannelOptions
+    .map(([provider, label]) => {
+      const channel = byProvider.get(provider);
+      const enabled = Boolean(channel?.enable);
+      const editing = editingCaptchaProviders.has(provider);
+      const configured = hasCaptchaChannelConfig(channel);
+      return `
+        <div class="push-channel" data-captcha-provider="${provider}">
+          <div class="push-channel-main">
+            <label class="check-row push-channel-toggle">
+              <input type="checkbox" data-captcha-toggle="${provider}" ${enabled ? "checked" : ""} />
+              <span>${label}</span>
+            </label>
+            <div class="push-channel-actions">
+              ${
+                configured && !editing
+                  ? `<button class="ghost icon-only" type="button" data-edit-captcha="${provider}" title="编辑${label}配置">
+                      <svg><use href="#i-edit"></use></svg>
+                    </button>`
+                  : ""
+              }
+              ${
+                editing
+                  ? `<button class="primary" type="button" data-save-captcha="${provider}" title="保存${label}配置">
+                      <svg><use href="#i-save"></use></svg>
+                      <span>保存</span>
+                    </button>`
+                  : ""
+              }
+            </div>
+          </div>
+          ${editing ? captchaChannelFields(provider, channel || emptyCaptchaChannel(provider)) : captchaChannelHiddenFields(channel)}
+        </div>
+      `;
+    })
+    .join("");
+  bindCaptchaChannelEvents();
+}
+
+function bindCaptchaChannelEvents() {
+  document.querySelectorAll("[data-captcha-toggle]").forEach((input) => {
+    input.addEventListener("change", () => {
+      collectConfig();
+      const provider = input.dataset.captchaToggle;
+      const existingChannel = findCaptchaChannel(provider);
+      if (input.checked) {
+        upsertCaptchaChannel({ ...emptyCaptchaChannel(provider), ...(existingChannel || {}), enable: true });
+        if (!hasCaptchaChannelConfig(existingChannel)) {
+          editingCaptchaProviders.add(provider);
+        } else {
+          editingCaptchaProviders.delete(provider);
+          autoSaveConfig()
+            .then(() => showToast("验证码识别已启用"))
+            .catch((error) => showToast(error.message));
+        }
+        renderCaptchaChannels();
+        return;
+      }
+      upsertCaptchaChannel({ ...emptyCaptchaChannel(provider), ...(existingChannel || {}), enable: false });
+      editingCaptchaProviders.delete(provider);
+      renderCaptchaChannels();
+      autoSaveConfig()
+        .then(() => showToast("验证码识别已关闭"))
+        .catch((error) => showToast(error.message));
+    });
+  });
+  document.querySelectorAll("[data-edit-captcha]").forEach((button) => {
+    button.addEventListener("click", () => {
+      collectConfig();
+      editingCaptchaProviders.add(button.dataset.editCaptcha);
+      renderCaptchaChannels();
+    });
+  });
+  document.querySelectorAll("[data-save-captcha]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try {
+        collectConfig();
+        editingCaptchaProviders.delete(button.dataset.saveCaptcha);
+        await saveConfig("验证码识别配置已保存");
+      } catch (error) {
+        showToast(error.message);
+      }
+    });
+  });
+}
+
+function captchaChannelFields(provider, channel) {
+  if (provider !== "damagou") return "";
+  return `
+    <div class="push-channel-fields form-grid compact">
+      <label>
+        <span>UserKey</span>
+        <input data-captcha-field="userkey" type="password" value="${escapeAttr(channel.userkey || "")}" autocomplete="off" />
+      </label>
+      <input data-captcha-field="type" type="hidden" value="${escapeAttr(channel.type || "")}" />
+      <input data-captcha-field="timeout" type="hidden" value="${escapeAttr(channel.timeout || 60)}" />
+    </div>
+  `;
+}
+
+function captchaChannelHiddenFields(channel) {
+  if (!channel) return "";
+  return Object.entries(channel)
+    .filter(([key]) => key !== "provider" && key !== "enable")
+    .map(([key, value]) => `<input data-captcha-field="${key}" type="hidden" value="${escapeAttr(value ?? "")}" />`)
+    .join("");
+}
+
+function emptyCaptchaChannel(provider) {
+  return {
+    provider,
+    enable: true,
+    userkey: "",
+    type: "",
+    timeout: 60,
+  };
+}
+
+function upsertCaptchaChannel(channel) {
+  config.captcha = config.captcha || {};
+  config.captcha.channels = config.captcha.channels || [];
+  const index = config.captcha.channels.findIndex((item) => item.provider === channel.provider);
+  if (index === -1) {
+    config.captcha.channels.push(channel);
+  } else {
+    config.captcha.channels[index] = { ...config.captcha.channels[index], ...channel };
+  }
+}
+
+function findCaptchaChannel(provider) {
+  return (config.captcha?.channels || []).find((item) => item.provider === provider) || null;
+}
+
+function hasCaptchaChannelConfig(channel) {
+  return Boolean(channel && String(channel.userkey || "").trim());
 }
 
 function renderAccounts() {
@@ -452,10 +620,19 @@ function collectConfig() {
     ...(config.push || {}),
     error_only: $("pushErrorOnly").checked,
   };
-  config.push.channels = Array.from(document.querySelectorAll(".push-channel"))
+  config.push.channels = Array.from(document.querySelectorAll("[data-push-provider]"))
     .map((row) => collectPushChannel(row))
-    .filter(Boolean);
+    .map((channel) => cleanPushChannel(channel))
+    .filter((channel) => shouldSavePushChannel(channel));
   config.push.enable = config.push.channels.some((channel) => channel.enable);
+  config.captcha = {
+    ...(config.captcha || {}),
+    max_retries: Number($("captchaMaxRetries").value || 3),
+  };
+  config.captcha.channels = Array.from(document.querySelectorAll("[data-captcha-provider]"))
+    .map((row) => collectCaptchaChannel(row))
+    .filter(Boolean);
+  config.captcha.enable = config.captcha.channels.some((channel) => channel.enable);
   config.accounts = Array.from(document.querySelectorAll(".account-row")).map((row) => {
     const item = {};
     row.querySelectorAll("[data-field]").forEach((field) => {
@@ -482,6 +659,21 @@ function collectPushChannel(row) {
       channel.smtp_port = Number(field.value || 465);
     } else {
       channel[field.dataset.pushField] = field.value.trim();
+    }
+  });
+  return channel;
+}
+
+function collectCaptchaChannel(row) {
+  const toggle = row.querySelector("[data-captcha-toggle]");
+  const provider = row.dataset.captchaProvider;
+  const channel = emptyCaptchaChannel(provider);
+  channel.enable = Boolean(toggle?.checked);
+  row.querySelectorAll("[data-captcha-field]").forEach((field) => {
+    if (field.dataset.captchaField === "timeout") {
+      channel.timeout = Number(field.value || 60);
+    } else {
+      channel[field.dataset.captchaField] = field.value.trim();
     }
   });
   return channel;

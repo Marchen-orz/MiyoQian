@@ -343,23 +343,16 @@ def preserve_push_channel_secrets(old_config: dict[str, Any], new_config: dict[s
     if not isinstance(new_channels, list):
         new_push["channels"] = []
         return
-    seen: set[str] = set()
     for channel in new_channels:
         if not isinstance(channel, dict):
             continue
         provider = str(channel.get("provider") or "")
-        seen.add(provider)
         old_channel = old_channels.get(provider)
         if not old_channel:
             continue
         for key, value in old_channel.items():
             if key not in channel or channel.get(key) in (None, ""):
                 channel[key] = value
-    for provider, old_channel in old_channels.items():
-        if provider and provider not in seen:
-            disabled_channel = dict(old_channel)
-            disabled_channel["enable"] = False
-            new_channels.append(disabled_channel)
 
 
 def diff_config(old: Any, new: Any, path: str = "") -> list[tuple[str, Any, Any]]:
@@ -461,6 +454,7 @@ def is_sensitive_config_path(path: str) -> bool:
         "mid",
         "token",
         "webhook",
+        "userkey",
         "secret",
         "password",
         "smtp_password",

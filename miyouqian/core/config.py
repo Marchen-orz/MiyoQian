@@ -38,6 +38,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "device": {"id": "", "fp": "", "name": "", "model": "", "presets": DEFAULT_DEVICE_PRESETS},
     "features": {"game_checkin": True, "bbs_tasks": False},
+    "captcha": {
+        "enable": False,
+        "max_retries": 3,
+        "channels": [{"provider": "damagou", "enable": False, "userkey": "", "type": "", "timeout": 60}],
+    },
     "schedule": {"enable": False, "time": "09:00", "jitter_minutes": 45, "run_on_start": False},
     "games": {
         "enabled": ["genshin", "starrail", "zzz"],
@@ -137,6 +142,13 @@ def normalize_config(config: dict[str, Any]) -> None:
         device["id"] = crypto.device_id(first_cookie or None)
     if not device.get("fp"):
         device["fp"] = crypto.device_fp()
+    captcha = config.setdefault("captcha", {})
+    captcha["channels"] = normalize_captcha_channels(captcha)
+    captcha["enable"] = any(channel.get("enable") for channel in captcha["channels"])
+    try:
+        captcha["max_retries"] = max(int(captcha.get("max_retries") or 3), 1)
+    except (TypeError, ValueError):
+        captcha["max_retries"] = 3
     push = config.setdefault("push", {})
     push["channels"] = normalize_push_channels(push)
     push["enable"] = any(channel.get("enable") for channel in push["channels"])
@@ -147,13 +159,19 @@ def normalize_config(config: dict[str, Any]) -> None:
     web.setdefault("password", "")
 
 
+PUSH_CHANNEL_FIELDS: dict[str, tuple[str, ...]] = {
+    "pushplus": ("token", "topic", "api_url"),
+    "telegram": ("token", "chat_id", "api_url"),
+    "dingrobot": ("webhook", "secret"),
+    "feishubot": ("webhook",),
+    "email": ("smtp_host", "smtp_port", "smtp_user", "smtp_password", "mail_from", "mail_to", "smtp_ssl"),
+}
+
 def normalize_push_channels(push: dict[str, Any]) -> list[dict[str, Any]]:
     allowed = {"pushplus", "telegram", "dingrobot", "feishubot", "email"}
     raw_channels = push.get("channels")
     if not isinstance(raw_channels, list):
         raw_channels = []
-    if not raw_channels and push.get("provider"):
-        raw_channels = [push]
 
     channels: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -164,24 +182,71 @@ def normalize_push_channels(push: dict[str, Any]) -> list[dict[str, Any]]:
         if provider not in allowed or provider in seen:
             continue
         seen.add(provider)
-        channel = {
+        channel: dict[str, Any] = {
             "provider": provider,
             "enable": parse_bool(raw.get("enable", push.get("enable", False))),
-            "token": str(raw.get("token") or ""),
-            "webhook": str(raw.get("webhook") or ""),
-            "api_url": str(raw.get("api_url") or ""),
-            "topic": str(raw.get("topic") or ""),
-            "chat_id": str(raw.get("chat_id") or ""),
-            "secret": str(raw.get("secret") or ""),
-            "smtp_host": str(raw.get("smtp_host") or ""),
-            "smtp_port": int(raw.get("smtp_port") or 465),
-            "smtp_user": str(raw.get("smtp_user") or ""),
-            "smtp_password": str(raw.get("smtp_password") or ""),
-            "mail_from": str(raw.get("mail_from") or ""),
-            "mail_to": str(raw.get("mail_to") or ""),
-            "smtp_ssl": parse_bool(raw.get("smtp_ssl", True)),
         }
-        channels.append(channel)
+        for field in PUSH_CHANNEL_FIELDS[provider]:
+            if field == "smtp_port":
+                channel[field] = int(raw.get(field) or 465)
+            elif field == "smtp_ssl":
+                channel[field] = parse_bool(raw.get(field, True))
+            else:
+                channel[field] = str(raw.get(field) or "")
+        if should_keep_push_channel(channel):
+            channels.append(channel)
+    return channels
+
+
+def should_keep_push_channel(channel: dict[str, Any]) -> bool:
+    if channel.get("enable"):
+        return True
+    provider = str(channel.get("provider") or "")
+    for field in PUSH_CHANNEL_FIELDS.get(provider, ()):
+        if field == "smtp_ssl":
+            continue
+        if field == "smtp_port":
+            if int(channel.get(field) or 465) != 465:
+                return True
+            continue
+        if str(channel.get(field) or "").strip():
+            return True
+    return False
+
+
+def normalize_captcha_channels(captcha: dict[str, Any]) -> list[dict[str, Any]]:
+    allowed = {"damagou"}
+    raw_channels = captcha.get("channels")
+    if not isinstance(raw_channels, list):
+        raw_channels = []
+    if not raw_channels:
+        raw_channels = [{"provider": "damagou", "enable": False}]
+
+    channels: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in raw_channels:
+        if not isinstance(raw, dict):
+            continue
+        provider = str(raw.get("provider") or "").strip() or "damagou"
+        if provider not in allowed or provider in seen:
+            continue
+        seen.add(provider)
+        try:
+            timeout = max(float(raw.get("timeout") or 60), 1)
+            normalized_timeout: int | float = int(timeout) if timeout.is_integer() else timeout
+        except (TypeError, ValueError):
+            normalized_timeout = 60
+        channels.append(
+            {
+                "provider": provider,
+                "enable": parse_bool(raw.get("enable", captcha.get("enable", False))),
+                "userkey": str(raw.get("userkey") or ""),
+                "type": str(raw.get("type") or ""),
+                "timeout": normalized_timeout,
+            }
+        )
+    if not any(channel["provider"] == "damagou" for channel in channels):
+        channels.append({"provider": "damagou", "enable": False, "userkey": "", "type": "", "timeout": 60})
     return channels
 
 

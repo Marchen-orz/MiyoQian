@@ -9,7 +9,7 @@ import time
 from typing import Any, Callable
 
 from .. import constants as c
-from ..core import cookies, crypto
+from ..core import captcha, cookies, crypto
 from ..core.http import ApiClient
 
 
@@ -193,8 +193,21 @@ class BbsTasks:
                 self._add(messages, f"{forum['name']} 社区签到成功")
                 success.append(f"{forum['name']}社区签到")
             elif data.get("retcode") == 1034:
-                self._add(messages, f"{forum['name']} 社区签到触发验证码，已跳过")
-                failed.append(f"{forum['name']}社区签到触发验证码")
+                retry_data = self._retry_bbs_captcha_request(
+                    messages,
+                    "社区签到",
+                    lambda challenge: self._community_sign_once(headers, body, challenge),
+                )
+                if retry_data.get("retcode") == 0:
+                    self._add(messages, f"{forum['name']} 社区签到成功")
+                    success.append(f"{forum['name']}社区签到")
+                elif not captcha.is_enabled(self.config):
+                    self._add(messages, f"{forum['name']} 社区签到触发验证码，已跳过")
+                    failed.append(f"{forum['name']}社区签到触发验证码")
+                else:
+                    reason = str(retry_data.get("message") or "未知错误")
+                    self._add(messages, f"{forum['name']} 社区签到验证码重试失败: {reason}")
+                    failed.append(f"{forum['name']}社区签到触发验证码")
             else:
                 reason = str(data.get("message") or "未知错误")
                 self._add(messages, f"{forum['name']} 社区签到失败: {reason}")
@@ -270,8 +283,29 @@ class BbsTasks:
                         headers=self._headers(),
                     )
             elif data.get("retcode") == 1034:
-                self._add(messages, f"点赞触发验证码，已跳过: {title}")
-                failed.append(f"点赞 {title} 触发验证码")
+                retry_data = self._retry_bbs_captcha_request(
+                    messages,
+                    "点赞",
+                    lambda challenge: self._like_once(post_id, challenge),
+                )
+                if retry_data.get("message") == "OK":
+                    self._add(messages, f"点赞成功: {title}")
+                    success.append(f"点赞 {title}")
+                    if self.bbs_config.get("cancel_like", True):
+                        self._sleep()
+                        self._add(messages, f"正在取消点赞: {title}")
+                        self.client.post_json(
+                            c.BBS_LIKE_URL,
+                            json={"post_id": post_id, "is_cancel": True},
+                            headers=self._headers(),
+                        )
+                elif not captcha.is_enabled(self.config):
+                    self._add(messages, f"点赞触发验证码，已跳过: {title}")
+                    failed.append(f"点赞 {title} 触发验证码")
+                else:
+                    reason = str(retry_data.get("message") or "未知错误")
+                    self._add(messages, f"点赞验证码重试失败: {title} ({reason})")
+                    failed.append(f"点赞 {title} 触发验证码")
             else:
                 reason = str(data.get("message") or "未知错误")
                 self._add(messages, f"点赞失败: {title} ({reason})")
@@ -305,6 +339,86 @@ class BbsTasks:
         if self.emit:
             self.emit(message)
 
+    def _community_sign_once(self, base_headers: dict[str, str], body: str, challenge: str) -> dict[str, Any]:
+        headers = dict(base_headers)
+        headers["x-rpc-challenge"] = challenge
+        headers["DS"] = crypto.ds_x6(body=body)
+        return self.client.post_json(c.BBS_SIGN_URL, content=body, headers=headers)
+
+    def _like_once(self, post_id: str, challenge: str) -> dict[str, Any]:
+        headers = self._headers()
+        headers["x-rpc-challenge"] = challenge
+        return self.client.post_json(
+            c.BBS_LIKE_URL,
+            json={"post_id": post_id, "is_cancel": False},
+            headers=headers,
+        )
+
+    def _retry_bbs_captcha_request(
+        self,
+        messages: list[str],
+        scene: str,
+        request: Callable[[str], dict[str, Any]],
+    ) -> dict[str, Any]:
+        if not captcha.is_enabled(self.config):
+            return {"retcode": 1034, "message": "触发验证码"}
+        max_retries = captcha_max_retries(self.config)
+        last_data: dict[str, Any] = {"retcode": 1034, "message": "触发验证码"}
+        for attempt in range(1, max_retries + 1):
+            challenge = self._pass_bbs_captcha(messages, scene, attempt, max_retries)
+            if not challenge:
+                last_data = {"retcode": 1034, "message": "验证码处理失败"}
+                continue
+            last_data = request(challenge)
+            if last_data.get("retcode") == 0 or last_data.get("message") == "OK":
+                return last_data
+            if attempt < max_retries:
+                self._add(messages, f"{scene}验证码提交失败，准备重新获取验证码")
+        return last_data
+
+    def _pass_bbs_captcha(self, messages: list[str], scene: str, attempt: int, max_retries: int) -> str:
+        provider = captcha.active_provider_label(self.config)
+        self._add(messages, f"{scene}触发验证码，正在调用{provider}识别({attempt}/{max_retries})")
+        create_data = self.client.get_json(c.BBS_CREATE_VERIFICATION_URL, headers=self._headers())
+        if create_data.get("retcode") != 0:
+            self._add(messages, f"{scene}验证码初始化失败: {create_data.get('message')}")
+            return ""
+        raw = create_data.get("data") or {}
+        gt = str(raw.get("gt") or "")
+        challenge = str(raw.get("challenge") or "")
+        if not gt or not challenge:
+            self._add(messages, f"{scene}验证码初始化结果缺少 gt/challenge")
+            return ""
+        geetest_success = parse_optional_int(raw.get("success"))
+        solution = captcha.solve_bbs_captcha(
+            self.client,
+            self.config,
+            gt,
+            challenge,
+            geetest_success=geetest_success,
+            emit=self.emit,
+        )
+        if not solution:
+            self._add(messages, f"{scene}验证码识别失败，准备重新获取验证码")
+            return ""
+        verify_data = self.client.post_json(
+            c.BBS_VERIFY_VERIFICATION_URL,
+            json={
+                "geetest_challenge": solution.challenge,
+                "geetest_validate": solution.validate,
+                "geetest_seccode": f"{solution.validate}|jordan",
+            },
+            headers=self._headers(),
+        )
+        if verify_data.get("retcode") != 0:
+            self._add(messages, f"{scene}验证码校验失败，准备重新获取验证码: {verify_data.get('message')}")
+            return ""
+        passed_challenge = str((verify_data.get("data") or {}).get("challenge") or "")
+        if not passed_challenge:
+            self._add(messages, f"{scene}验证码校验结果缺少 challenge，准备重新获取验证码")
+            return ""
+        return passed_challenge
+
     def _sleep(self) -> None:
         span = self.bbs_config.get("delay_seconds", [1, 3])
         try:
@@ -312,3 +426,17 @@ class BbsTasks:
         except (TypeError, ValueError, IndexError):
             low, high = 1, 3
         time.sleep(random.uniform(max(low, 0), max(high, low)))
+
+
+def parse_optional_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def captcha_max_retries(config: dict[str, Any]) -> int:
+    try:
+        return max(int(config.get("captcha", {}).get("max_retries") or 3), 1)
+    except (TypeError, ValueError):
+        return 3
