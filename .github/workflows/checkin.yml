@@ -44,7 +44,7 @@ jobs:
           python-version-file: ".python-version"
 
       - name: 安装 uv
-        uses: astral-sh/setup-uv@v8
+        uses: astral-sh/setup-uv@v8.1.0
         with:
           enable-cache: true
 
