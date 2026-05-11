@@ -12,6 +12,10 @@
   </p>
 </div>
 
+## 仓库统计
+
+![Repobeats analytics image](https://repobeats.axiom.co/api/embed/fe6d87dac87579ae661915dfc1ba84cceb511728.svg "https://repobeats.axiom.co/api/embed/fe6d87dac87579ae661915dfc1ba84cceb511728.svg")
+
 ## 简介
 
 米游签是一款小而美，精致便捷的米游社每日签到工具。你只需要用米游社 APP 扫码登录一次，之后就可以在本地 Web 控制台里管理账号、选择任务、设置每天自动执行签到任务。
