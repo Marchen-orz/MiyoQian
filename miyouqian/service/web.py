@@ -137,7 +137,7 @@ class WebApp:
         line = format_line(message, component)
         with self.lock:
             self.logs.append(line)
-            self.logs = self.logs[-300:]
+            self.logs = self.logs[-500:]
             log_file = self.log_file
         append_log(log_file, line, component=component)
 
@@ -164,7 +164,7 @@ class WebApp:
 
     def status(self) -> dict[str, Any]:
         with self.lock:
-            logs = list(self.logs[-120:])
+            logs = list(self.logs[-300:])
             login_state = dict(self.login_state)
         return {
             "scheduler": self.scheduler.status(),
@@ -582,7 +582,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(raw)))
         if set_cookie:
-            self.send_header("Set-Cookie", f"{AUTH_COOKIE}={set_cookie}; Path=/; HttpOnly; SameSite=Strict")
+            # 7 天过期 (7 * 24 * 60 * 60 = 604800 秒)
+            self.send_header("Set-Cookie", f"{AUTH_COOKIE}={set_cookie}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800")
         self.end_headers()
         self.wfile.write(raw)
 
@@ -601,8 +602,17 @@ def serve(config_path: pathlib.Path, host: str, port: int) -> None:
     if actual_port != port:
         app.log(f"端口 {port} 被占用，已切换到 {actual_port}", "startup")
     app.start()
-    url = f"http://{host}:{actual_port}"
-    app.log(f"Web 控制台已启动: {url}", "web")
+
+    # 显示可访问的地址
+    if host == "0.0.0.0":
+        # 外网模式，显示本地访问地址
+        local_url = f"http://127.0.0.1:{actual_port}"
+        app.log(f"Web 控制台已启动: {local_url}", "web")
+        app.log("外网访问请替换为实际 IP 地址", "web")
+    else:
+        url = f"http://{host}:{actual_port}"
+        app.log(f"Web 控制台已启动: {url}", "web")
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
