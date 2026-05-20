@@ -37,6 +37,13 @@ BBS_LIKE_URL = f"{BBS_API}/apihub/sapi/upvotePost"
 BBS_CREATE_VERIFICATION_URL = f"{BBS_API}/misc/api/createVerification?is_high=true"
 BBS_VERIFY_VERIFICATION_URL = f"{BBS_API}/misc/api/verifyVerification"
 
+MALL_POINT_URL = f"{TAKUMI_API}/common/homutreasure/v1/web/user/point"
+MALL_GOODS_LIST_URL = f"{TAKUMI_API}/mall/v1/web/goods/list"
+MALL_GOOD_DETAIL_URL = f"{TAKUMI_API}/mall/v1/web/goods/detail"
+MALL_EXCHANGE_URL = "https://api-takumi.miyoushe.com/mall/v1/web/goods/exchange"
+MALL_ADDRESS_URL = f"{TAKUMI_API}/account/address/list"
+DEVICE_FP_URL = "https://public-data-api.mihoyo.com/device-fp/api/getFp"
+
 QRCODE_FETCH_URL = "https://hk4e-sdk.mihoyo.com/hk4e_cn/combo/panda/qrcode/fetch"
 QRCODE_QUERY_URL = "https://hk4e-sdk.mihoyo.com/hk4e_cn/combo/panda/qrcode/query"
 TOKEN_BY_GAME_TOKEN_URL = (

@@ -12,10 +12,11 @@ import mimetypes
 import pathlib
 import secrets
 import threading
+from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import qrcode
 
@@ -23,6 +24,8 @@ from ..auth.login import QRLogin
 from ..core.config import load_config, log_path, normalize_config, save_config, validate_unique_account_uids
 from ..core.http import ApiClient
 from ..core.logs import append_log, configure_logger, format_line, print_startup_banner
+from ..tasks.shop_exchange import ShopExchange
+from .exchange_scheduler import ExchangeScheduler
 from .notifier import is_task_success, send_push
 from .runner import run_tasks
 from .scheduler import DailyScheduler
@@ -64,6 +67,11 @@ class WebApp:
         self.logs: list[str] = []
         self.login_state: dict[str, Any] = {"running": False, "status": "idle"}
         self.scheduler = DailyScheduler(self.config, self.run_all, lambda message: self.log(message, "scheduler"))
+        self.exchange_scheduler = ExchangeScheduler(
+            self.config,
+            self.run_shop_exchange_plan,
+            lambda message: self.log(message, "exchange"),
+        )
         self._sessions: dict[str, float] = {}
 
     def _ensure_password_hashed(self) -> None:
@@ -129,9 +137,11 @@ class WebApp:
 
     def start(self) -> None:
         self.scheduler.start()
+        self.exchange_scheduler.start()
 
     def stop(self) -> None:
         self.scheduler.stop()
+        self.exchange_scheduler.stop()
 
     def log(self, message: str, component: str = "web") -> None:
         line = format_line(message, component)
@@ -166,8 +176,11 @@ class WebApp:
         with self.lock:
             logs = list(self.logs[-300:])
             login_state = dict(self.login_state)
+            shop_exchange = copy.deepcopy(self.config.get("shop_exchange", {}))
         return {
             "scheduler": self.scheduler.status(),
+            "exchange_scheduler": self.exchange_scheduler.status(),
+            "shop_exchange": shop_exchange,
             "login": login_state,
             "logs": logs,
         }
@@ -191,6 +204,7 @@ class WebApp:
             self.log_file = log_path(self.config_path, self.config)
             configure_logger(self.log_file)
             self.scheduler.reload(self.config)
+            self.exchange_scheduler.reload(self.config)
         visible_changes = [change for change in changes if should_log_config_change(*change)]
         if visible_changes:
             self.log(f"配置已保存，共 {len(visible_changes)} 项变更", "config")
@@ -203,6 +217,167 @@ class WebApp:
                 self.log(f"配置项变更过多，已省略 {len(visible_changes) - 50} 项", "config")
         else:
             self.log("配置已保存，未检测到配置项变化", "config")
+
+    def shop_goods(self, game: str = "") -> dict[str, Any]:
+        game_label = game or "全部分区"
+        self.log(f"开始获取商品列表: {game_label}", "exchange")
+        with self.lock:
+            config = copy.deepcopy(self.config)
+        try:
+            with ApiClient(timeout=20.0) as client:
+                result = ShopExchange(client, config, emit=lambda message: self.log(message, "exchange")).goods(game=game)
+        except Exception as exc:
+            self.log(f"商品列表获取失败: {game_label}，{exc}", "exchange")
+            raise
+        goods_count = len(result.get("goods") or [])
+        self.log(f"商品列表获取完成: {game_label}，共 {goods_count} 个商品", "exchange")
+        return result
+
+    def shop_good_detail(self, goods_id: str) -> dict[str, Any]:
+        self.log(f"开始获取商品详情: {goods_id}", "exchange")
+        with self.lock:
+            config = copy.deepcopy(self.config)
+        try:
+            with ApiClient(timeout=20.0) as client:
+                result = ShopExchange(client, config).good_detail(goods_id)
+        except Exception as exc:
+            self.log(f"商品详情获取失败: {goods_id}，{exc}", "exchange")
+            raise
+        self.log(f"商品详情获取完成: {result.get('goods_name') or goods_id}", "exchange")
+        return result
+
+    def ensure_shop_device_fp(self) -> dict[str, Any]:
+        self.log("开始预获取商品兑换 device_fp", "exchange")
+        with self.lock:
+            config = copy.deepcopy(self.config)
+        try:
+            with ApiClient(timeout=20.0) as client:
+                device_fp = ShopExchange(client, config).fetch_device_fp()
+        except Exception as exc:
+            self.log(f"商品兑换 device_fp 获取失败: {exc}", "exchange")
+            raise
+        with self.lock:
+            self.config.setdefault("device", {})["fp"] = device_fp
+            save_config(self.config_path, self.config)
+        self.log("已预获取商品兑换 device_fp", "exchange")
+        return {"device_fp": device_fp}
+
+    def shop_account_meta(self, account_index: int, game_biz: str = "") -> dict[str, Any]:
+        account = self._account_by_index(account_index)
+        account_name = display_account_name(account)
+        self.log(f"开始获取兑换账号信息: {account_name}，game_biz={game_biz or '无'}", "exchange")
+        with self.lock:
+            config = copy.deepcopy(self.config)
+        with ApiClient(timeout=20.0) as client:
+            shop = ShopExchange(client, config, account)
+            result: dict[str, Any] = {"points": {}, "addresses": [], "roles": []}
+            try:
+                result["points"] = shop.points()
+            except Exception as exc:
+                result["points_error"] = str(exc)
+                self.log(f"米游币余额获取失败: {account_name}，{exc}", "exchange")
+            try:
+                result["addresses"] = shop.addresses()
+            except Exception as exc:
+                result["addresses_error"] = str(exc)
+                self.log(f"收货地址获取失败: {account_name}，{exc}", "exchange")
+            if game_biz:
+                try:
+                    result["roles"] = shop.roles(game_biz)
+                except Exception as exc:
+                    result["roles_error"] = str(exc)
+                    self.log(f"游戏角色获取失败: {account_name}，{game_biz}，{exc}", "exchange")
+                    raise
+            self.log(
+                f"兑换账号信息获取完成: {account_name}，地址 {len(result.get('addresses') or [])} 个，角色 {len(result.get('roles') or [])} 个",
+                "exchange",
+            )
+            return result
+
+    def shop_exchange_once(self, plan: dict[str, Any]) -> dict[str, Any]:
+        account = self._account_by_index(int(plan.get("account_index") or 0))
+        account_name = display_account_name(account)
+        goods_name = str(plan.get("goods_name") or plan.get("goods_id") or "未知商品")
+        self.log(f"开始商品兑换: {goods_name}，账号 {account_name}", "exchange")
+        try:
+            self.ensure_shop_device_fp()
+        except Exception:
+            self.log(f"商品兑换中止: {goods_name}，账号 {account_name}，device_fp 获取失败", "exchange")
+            raise
+        with self.lock:
+            config = copy.deepcopy(self.config)
+        try:
+            with ApiClient(timeout=15.0) as client:
+                result = ShopExchange(
+                    client,
+                    config,
+                    account,
+                    emit=lambda message: self.log(message, "exchange"),
+                ).exchange_with_retry(plan)
+        except Exception as exc:
+            self.log(f"商品兑换请求异常: {goods_name}，账号 {account_name}，{exc}", "exchange")
+            raise
+        summary = f"{result.get('message', '未知结果')}({result.get('retcode')})，请求 {result.get('attempt', 1)} 次"
+        self.log(f"商品兑换结束: {goods_name}，账号 {account_name}，{summary}", "exchange")
+        return result
+
+    def shop_exchange_plan_once(self, plan_index: int) -> dict[str, Any]:
+        with self.lock:
+            plans = self.config.get("shop_exchange", {}).get("plans") or []
+            if plan_index < 0 or plan_index >= len(plans):
+                raise ValueError("兑换计划不存在")
+            plan = copy.deepcopy(plans[plan_index])
+            goods_name = plan.get("goods_name") or plan.get("goods_id")
+        self.log(f"开始手动执行商品兑换计划 {plan_index + 1}: {goods_name}", "exchange")
+        result = self.shop_exchange_once(plan)
+        summary = f"{result.get('message', '未知结果')}({result.get('retcode')})，请求 {result.get('attempt', 1)} 次"
+        with self.lock:
+            plans = self.config.get("shop_exchange", {}).get("plans") or []
+            if plan_index < len(plans):
+                plans[plan_index]["last_result"] = summary
+                plans[plan_index]["last_run"] = datetime.now().isoformat(timespec="seconds")
+                plans[plan_index]["last_attempt_key"] = f"manual:{datetime.now().isoformat(timespec='seconds')}"
+                if result.get("ok"):
+                    plans[plan_index]["enable"] = False
+                save_config(self.config_path, self.config)
+                self.exchange_scheduler.reload(self.config)
+        self.log(f"手动商品兑换计划完成 {plan_index + 1}: {goods_name}，{summary}", "exchange")
+        return result
+
+    def run_shop_exchange_plan(self, plan_index: int) -> None:
+        with self.lock:
+            plans = self.config.get("shop_exchange", {}).get("plans") or []
+            if plan_index < 0 or plan_index >= len(plans):
+                raise ValueError("兑换计划不存在")
+            plan = copy.deepcopy(plans[plan_index])
+            goods_name = plan.get("goods_name") or plan.get("goods_id")
+            exchange_at = int(plan.get("exchange_at") or 0)
+            plans[plan_index]["last_attempt_key"] = f"{plan.get('goods_id', '')}:{exchange_at}"
+            plans[plan_index]["last_run"] = datetime.now().isoformat(timespec="seconds")
+            save_config(self.config_path, self.config)
+        self.log(f"开始执行商品兑换计划: {goods_name}", "exchange")
+        result = self.shop_exchange_once(plan)
+        summary = f"{result.get('message', '未知结果')}({result.get('retcode')})，请求 {result.get('attempt', 1)} 次"
+        with self.lock:
+            plans = self.config.get("shop_exchange", {}).get("plans") or []
+            if plan_index < len(plans):
+                plans[plan_index]["last_result"] = summary
+                plans[plan_index]["last_run"] = datetime.now().isoformat(timespec="seconds")
+                if result.get("ok"):
+                    plans[plan_index]["enable"] = False
+                save_config(self.config_path, self.config)
+                self.exchange_scheduler.reload(self.config)
+        self.log(f"商品兑换计划完成: {goods_name}，{summary}", "exchange")
+
+    def _account_by_index(self, account_index: int) -> dict[str, Any]:
+        with self.lock:
+            accounts = self.config.get("accounts") or []
+            if account_index < 0 or account_index >= len(accounts):
+                raise ValueError("请选择已登录账号")
+            account = copy.deepcopy(accounts[account_index])
+        if not str(account.get("cookie") or "").strip():
+            raise ValueError("账号未登录或缺少 cookie")
+        return account
 
     def start_login(
         self,
@@ -465,6 +640,13 @@ def is_sensitive_config_path(path: str) -> bool:
     return any(part in sensitive_names or part.endswith("_token") for part in parts)
 
 
+def first_query(query: dict[str, list[str]], key: str, default: str = "") -> str:
+    values = query.get(key)
+    if not values:
+        return default
+    return values[0]
+
+
 class Handler(BaseHTTPRequestHandler):
     app: WebApp
 
@@ -486,7 +668,9 @@ class Handler(BaseHTTPRequestHandler):
         return self.app._check_session(token)
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
+        query = parse_qs(parsed.query)
         try:
             if path == "/api/auth/status":
                 self.send_json(self.app.auth_status())
@@ -499,6 +683,20 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/status":
                 self.send_json(self.app.status())
+                return
+            if path == "/api/shop/goods":
+                self.send_json(self.app.shop_goods(str(first_query(query, "game"))))
+                return
+            if path == "/api/shop/good-detail":
+                self.send_json(self.app.shop_good_detail(str(first_query(query, "goods_id"))))
+                return
+            if path == "/api/shop/account-meta":
+                account_index = int(first_query(query, "account_index", "0") or 0)
+                game_biz = str(first_query(query, "game_biz", ""))
+                self.send_json(self.app.shop_account_meta(account_index, game_biz))
+                return
+            if path == "/api/shop/device-fp":
+                self.send_json(self.app.ensure_shop_device_fp())
                 return
             self.serve_static(path)
         except Exception as exc:
@@ -540,6 +738,17 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("账号数据必须是 JSON 对象")
                 self.app.start_login(account_index, timeout, account_payload, bool(payload.get("draft")))
                 self.send_json({"ok": True})
+                return
+            if path == "/api/shop/exchange":
+                if "plan_index" in payload:
+                    result = self.app.shop_exchange_plan_once(int(payload.get("plan_index")))
+                    self.send_json({"ok": True, "result": result, "config": self.app.get_config()})
+                    return
+                plan = payload.get("plan")
+                if not isinstance(plan, dict):
+                    raise ValueError("兑换计划必须是 JSON 对象")
+                result = self.app.shop_exchange_once(plan)
+                self.send_json({"ok": True, "result": result})
                 return
             self.send_error_json("接口不存在", HTTPStatus.NOT_FOUND)
         except Exception as exc:

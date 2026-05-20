@@ -54,7 +54,11 @@
             <h1>米游签</h1>
           </div>
         </div>
-        <div class="actions">
+        <div class="view-switch" role="tablist" aria-label="界面切换">
+          <button class="ghost is-active" data-view="dashboard" type="button" title="签到控制台">签到</button>
+          <button class="ghost" data-view="shop" type="button" title="店铺商品兑换">兑换</button>
+        </div>
+        <div class="actions" data-view-actions="dashboard">
           <button class="ghost" id="refreshBtn" type="button" title="刷新">
             <svg><use href="#i-refresh"></use></svg>
             <span>刷新</span>
@@ -66,26 +70,27 @@
         </div>
       </header>
 
-      <section class="status-grid" aria-label="运行状态">
-        <div class="metric">
-          <span>账号</span>
-          <strong id="accountMetric">-</strong>
-        </div>
-        <div class="metric">
-          <span>自动调度</span>
-          <strong id="scheduleMetric">-</strong>
-        </div>
-        <div class="metric">
-          <span>下次执行</span>
-          <strong id="nextRun">-</strong>
-        </div>
-        <div class="metric">
-          <span>最近结果</span>
-          <strong id="lastResult">-</strong>
-        </div>
-      </section>
+      <section class="view-panel" data-view-panel="dashboard">
+        <section class="status-grid" aria-label="运行状态">
+          <div class="metric">
+            <span>账号</span>
+            <strong id="accountMetric">-</strong>
+          </div>
+          <div class="metric">
+            <span>自动调度</span>
+            <strong id="scheduleMetric">-</strong>
+          </div>
+          <div class="metric">
+            <span>下次执行</span>
+            <strong id="nextRun">-</strong>
+          </div>
+          <div class="metric">
+            <span>最近结果</span>
+            <strong id="lastResult">-</strong>
+          </div>
+        </section>
 
-      <section class="app-layout">
+        <section class="app-layout">
         <div class="config-column">
           <details class="panel" open>
             <summary>
@@ -213,6 +218,84 @@
             <pre id="logs" class="logs"></pre>
           </article>
         </aside>
+      </section>
+      </section>
+
+      <section class="view-panel is-hidden" data-view-panel="shop">
+        <section class="status-grid shop-status" aria-label="商品兑换状态">
+          <div class="metric">
+            <span>自动兑换</span>
+            <strong id="shopScheduleMetric">-</strong>
+          </div>
+          <div class="metric">
+            <span>下次兑换</span>
+            <strong id="shopNextRun">-</strong>
+          </div>
+          <div class="metric">
+            <span>商品数量</span>
+            <strong id="shopGoodsMetric">刷新后显示</strong>
+          </div>
+          <div class="metric">
+            <span>计划数量</span>
+            <strong id="shopPlansMetric">-</strong>
+          </div>
+        </section>
+
+        <section class="shop-layout">
+          <div class="shop-main">
+            <article class="panel">
+              <div class="panel-head shop-head">
+                <div>
+                  <h2>店铺商品</h2>
+                  <p>商品图片、兑换时间、库存、价格与限购信息</p>
+                </div>
+                <div class="shop-tools">
+                  <select id="shopGameFilter" aria-label="商品分区"></select>
+                  <button class="ghost" id="shopRefreshBtn" type="button" title="刷新商品">
+                    <svg><use href="#i-refresh"></use></svg>
+                    <span>刷新商品</span>
+                  </button>
+                </div>
+              </div>
+              <div id="shopGoods" class="shop-goods"></div>
+            </article>
+          </div>
+
+          <aside class="shop-side">
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2>自动兑换</h2>
+                  <p>到点后使用选定账号发送兑换请求</p>
+                </div>
+              </div>
+              <label class="check-row">
+                <input id="shopEnable" type="checkbox" data-autosave />
+                <span>启用商品自动兑换</span>
+              </label>
+              <div class="form-grid two compact">
+                <label>
+                  <span>持续请求秒数</span>
+                  <input id="shopRetrySeconds" type="number" min="0" max="30" step="0.5" data-autosave />
+                </label>
+                <label>
+                  <span>请求间隔秒</span>
+                  <input id="shopRetryInterval" type="number" min="0.05" max="5" step="0.05" data-autosave />
+                </label>
+              </div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2>兑换计划</h2>
+                  <p>可为实体商品填写地址 ID，为虚拟商品填写游戏 UID 和服务器</p>
+                </div>
+              </div>
+              <div id="shopPlans" class="shop-plans"></div>
+            </article>
+          </aside>
+        </section>
       </section>
     </main>
 
