@@ -10,7 +10,12 @@ const gameOptions = [
 const cloudGameOptions = [
   ["genshin", "云原神", false, ""],
   ["zzz", "云绝区零", false, ""],
-  ["starrail", "云星穹铁道", true, "云星穹铁道是版本更新赠送 600 分钟，不需要每日签到获取时长"],
+  [
+    "starrail",
+    "云星穹铁道",
+    true,
+    "云星穹铁道是版本更新赠送 600 分钟，不需要每日签到获取时长",
+  ],
 ];
 
 const pushChannelOptions = [
@@ -21,9 +26,7 @@ const pushChannelOptions = [
   ["email", "邮箱"],
 ];
 
-const captchaChannelOptions = [
-  ["damagou", "打码狗(成本≈0.01元/次)"],
-];
+const captchaChannelOptions = [["damagou", "打码狗(成本≈0.01元/次)"]];
 
 let config = null;
 let toastTimer = null;
@@ -72,7 +75,10 @@ function showToast(message) {
 
 async function loadConfig() {
   config = await api("/api/config");
-  config.accounts = (config.accounts || []).map((account) => ({ ...account, _draft: false }));
+  config.accounts = (config.accounts || []).map((account) => ({
+    ...account,
+    _draft: false,
+  }));
   renderConfig();
 }
 
@@ -83,7 +89,9 @@ function renderConfig() {
   $("runOnStart").checked = Boolean(config.schedule?.run_on_start ?? false);
 
   $("gameCheckin").checked = Boolean(config.features?.game_checkin ?? true);
-  $("cloudGameCheckin").checked = Boolean(config.features?.cloud_game_checkin ?? false);
+  $("cloudGameCheckin").checked = Boolean(
+    config.features?.cloud_game_checkin ?? false,
+  );
   $("bbsTasks").checked = Boolean(config.features?.bbs_tasks ?? false);
   $("bbsCheckin").checked = Boolean(config.bbs?.checkin ?? true);
   $("bbsRead").checked = Boolean(config.bbs?.read ?? true);
@@ -110,7 +118,7 @@ function renderGames() {
           <input type="checkbox" data-game="${key}" data-autosave ${enabled.has(key) ? "checked" : ""} />
           <span>${label}</span>
         </label>
-      `
+      `,
     )
     .join("");
   updateTaskDependencyState();
@@ -137,9 +145,17 @@ function updateTaskDependencyState() {
   const cloudEnabled = $("cloudGameCheckin").checked;
   const bbsEnabled = $("bbsTasks").checked;
   setTaskGroupDisabled("gameTaskGroup", "[data-game]", !gameEnabled);
-  setTaskGroupDisabled("cloudGameTaskGroup", "[data-cloud-game]:not([data-cloud-game-disabled])", !cloudEnabled);
+  setTaskGroupDisabled(
+    "cloudGameTaskGroup",
+    "[data-cloud-game]:not([data-cloud-game-disabled])",
+    !cloudEnabled,
+  );
   updateAccountCloudGameInputs();
-  setTaskGroupDisabled("bbsTaskGroup", "#bbsCheckin, #bbsRead, #bbsLike, #bbsShare", !bbsEnabled);
+  setTaskGroupDisabled(
+    "bbsTaskGroup",
+    "#bbsCheckin, #bbsRead, #bbsLike, #bbsShare",
+    !bbsEnabled,
+  );
 }
 
 function setTaskGroupDisabled(groupId, selector, disabled) {
@@ -163,7 +179,9 @@ function updateAccountCloudGameInputs() {
 
 function renderPushChannels() {
   const channels = config.push?.channels || [];
-  const byProvider = new Map(channels.map((channel) => [channel.provider, channel]));
+  const byProvider = new Map(
+    channels.map((channel) => [channel.provider, channel]),
+  );
   $("pushChannels").innerHTML = pushChannelOptions
     .map(([provider, label]) => {
       const channel = byProvider.get(provider);
@@ -210,7 +228,11 @@ function bindPushChannelEvents() {
       const provider = input.dataset.pushToggle;
       if (input.checked) {
         const existingChannel = findPushChannel(provider);
-        upsertPushChannel({ ...emptyPushChannel(provider), ...(existingChannel || {}), enable: true });
+        upsertPushChannel({
+          ...emptyPushChannel(provider),
+          ...(existingChannel || {}),
+          enable: true,
+        });
         if (!hasPushChannelConfig(existingChannel)) {
           editingPushProviders.add(provider);
         } else {
@@ -222,7 +244,11 @@ function bindPushChannelEvents() {
         renderPushChannels();
         return;
       }
-      upsertPushChannel({ ...emptyPushChannel(provider), ...(findPushChannel(provider) || {}), enable: false });
+      upsertPushChannel({
+        ...emptyPushChannel(provider),
+        ...(findPushChannel(provider) || {}),
+        enable: false,
+      });
       editingPushProviders.delete(provider);
       renderPushChannels();
       autoSaveConfig()
@@ -254,7 +280,6 @@ function pushChannelFields(provider, channel) {
   const common = {
     token: channel.token || "",
     webhook: channel.webhook || "",
-    api_url: channel.api_url || "",
     topic: channel.topic || "",
     chat_id: channel.chat_id || "",
     secret: channel.secret || "",
@@ -279,23 +304,16 @@ function pushChannelFields(provider, channel) {
     </label>
   `;
   const fields = {
-    pushplus: [
-      field("token", "Token", "password"),
-      field("topic", "群组编码"),
-      field("api_url", "自定义 API 地址"),
-    ],
+    pushplus: [field("token", "Token", "password"), field("topic", "群组编码")],
     telegram: [
       field("token", "Bot Token", "password"),
       field("chat_id", "Chat ID"),
-      field("api_url", "自定义 API 地址"),
     ],
     dingrobot: [
       field("webhook", "Webhook", "password"),
       field("secret", "加签 Secret", "password"),
     ],
-    feishubot: [
-      field("webhook", "Webhook", "password"),
-    ],
+    feishubot: [field("webhook", "Webhook", "password")],
     email: [
       field("smtp_host", "SMTP 服务器"),
       field("smtp_port", "SMTP 端口", "number"),
@@ -313,7 +331,10 @@ function pushChannelHiddenFields(channel) {
   if (!channel) return "";
   return Object.entries(cleanPushChannel(channel))
     .filter(([key]) => key !== "provider" && key !== "enable")
-    .map(([key, value]) => `<input data-push-field="${key}" type="hidden" value="${escapeAttr(value ?? "")}" />`)
+    .map(
+      ([key, value]) =>
+        `<input data-push-field="${key}" type="hidden" value="${escapeAttr(value ?? "")}" />`,
+    )
     .join("");
 }
 
@@ -324,16 +345,24 @@ function emptyPushChannel(provider) {
 function upsertPushChannel(channel) {
   config.push = config.push || {};
   config.push.channels = config.push.channels || [];
-  const index = config.push.channels.findIndex((item) => item.provider === channel.provider);
+  const index = config.push.channels.findIndex(
+    (item) => item.provider === channel.provider,
+  );
   if (index === -1) {
     config.push.channels.push(channel);
   } else {
-    config.push.channels[index] = { ...config.push.channels[index], ...channel };
+    config.push.channels[index] = {
+      ...config.push.channels[index],
+      ...channel,
+    };
   }
 }
 
 function findPushChannel(provider) {
-  return (config.push?.channels || []).find((item) => item.provider === provider) || null;
+  return (
+    (config.push?.channels || []).find((item) => item.provider === provider) ||
+    null
+  );
 }
 
 function hasPushChannelConfig(channel) {
@@ -341,7 +370,6 @@ function hasPushChannelConfig(channel) {
   const configKeys = [
     "token",
     "webhook",
-    "api_url",
     "topic",
     "chat_id",
     "secret",
@@ -356,11 +384,19 @@ function hasPushChannelConfig(channel) {
 
 function pushChannelFieldNames(provider) {
   const fields = {
-    pushplus: ["token", "topic", "api_url"],
-    telegram: ["token", "chat_id", "api_url"],
+    pushplus: ["token", "topic"],
+    telegram: ["token", "chat_id"],
     dingrobot: ["webhook", "secret"],
     feishubot: ["webhook"],
-    email: ["smtp_host", "smtp_port", "smtp_user", "smtp_password", "mail_from", "mail_to", "smtp_ssl"],
+    email: [
+      "smtp_host",
+      "smtp_port",
+      "smtp_user",
+      "smtp_password",
+      "mail_from",
+      "mail_to",
+      "smtp_ssl",
+    ],
   };
   return fields[provider] || [];
 }
@@ -394,7 +430,9 @@ function shouldSavePushChannel(channel) {
 
 function renderCaptchaChannels() {
   const channels = config.captcha?.channels || [];
-  const byProvider = new Map(channels.map((channel) => [channel.provider, channel]));
+  const byProvider = new Map(
+    channels.map((channel) => [channel.provider, channel]),
+  );
   $("captchaChannels").innerHTML = captchaChannelOptions
     .map(([provider, label]) => {
       const channel = byProvider.get(provider);
@@ -441,7 +479,11 @@ function bindCaptchaChannelEvents() {
       const provider = input.dataset.captchaToggle;
       const existingChannel = findCaptchaChannel(provider);
       if (input.checked) {
-        upsertCaptchaChannel({ ...emptyCaptchaChannel(provider), ...(existingChannel || {}), enable: true });
+        upsertCaptchaChannel({
+          ...emptyCaptchaChannel(provider),
+          ...(existingChannel || {}),
+          enable: true,
+        });
         if (!hasCaptchaChannelConfig(existingChannel)) {
           editingCaptchaProviders.add(provider);
         } else {
@@ -453,7 +495,11 @@ function bindCaptchaChannelEvents() {
         renderCaptchaChannels();
         return;
       }
-      upsertCaptchaChannel({ ...emptyCaptchaChannel(provider), ...(existingChannel || {}), enable: false });
+      upsertCaptchaChannel({
+        ...emptyCaptchaChannel(provider),
+        ...(existingChannel || {}),
+        enable: false,
+      });
       editingCaptchaProviders.delete(provider);
       renderCaptchaChannels();
       autoSaveConfig()
@@ -499,7 +545,10 @@ function captchaChannelHiddenFields(channel) {
   if (!channel) return "";
   return Object.entries(channel)
     .filter(([key]) => key !== "provider" && key !== "enable")
-    .map(([key, value]) => `<input data-captcha-field="${key}" type="hidden" value="${escapeAttr(value ?? "")}" />`)
+    .map(
+      ([key, value]) =>
+        `<input data-captcha-field="${key}" type="hidden" value="${escapeAttr(value ?? "")}" />`,
+    )
     .join("");
 }
 
@@ -516,16 +565,25 @@ function emptyCaptchaChannel(provider) {
 function upsertCaptchaChannel(channel) {
   config.captcha = config.captcha || {};
   config.captcha.channels = config.captcha.channels || [];
-  const index = config.captcha.channels.findIndex((item) => item.provider === channel.provider);
+  const index = config.captcha.channels.findIndex(
+    (item) => item.provider === channel.provider,
+  );
   if (index === -1) {
     config.captcha.channels.push(channel);
   } else {
-    config.captcha.channels[index] = { ...config.captcha.channels[index], ...channel };
+    config.captcha.channels[index] = {
+      ...config.captcha.channels[index],
+      ...channel,
+    };
   }
 }
 
 function findCaptchaChannel(provider) {
-  return (config.captcha?.channels || []).find((item) => item.provider === provider) || null;
+  return (
+    (config.captcha?.channels || []).find(
+      (item) => item.provider === provider,
+    ) || null
+  );
 }
 
 function hasCaptchaChannelConfig(channel) {
@@ -536,8 +594,8 @@ function renderAccounts() {
   const accounts = config.accounts || [];
   $("accounts").innerHTML = accounts.length
     ? accounts
-    .map(
-      (account, index) => `
+        .map(
+          (account, index) => `
         <div class="account-row" data-index="${index}" data-draft="${account._draft ? "1" : "0"}">
           <div class="account-main">
             <div class="account-title">
@@ -588,16 +646,18 @@ function renderAccounts() {
           ${accountCloudGameFields(account, index)}
           <div class="account-login-slot" data-login-slot="${index}"></div>
         </div>
-      `
-    )
-    .join("")
+      `,
+        )
+        .join("")
     : `<div class="empty-state">
         <strong>暂无账号</strong>
         <span>添加账号后，可在账号卡片内扫码登录。</span>
       </div>`;
   document.querySelectorAll("[data-login]").forEach((button) => {
     button.addEventListener("click", () => {
-      startLogin(Number(button.dataset.login)).catch((error) => showToast(error.message));
+      startLogin(Number(button.dataset.login)).catch((error) =>
+        showToast(error.message),
+      );
     });
   });
   document.querySelectorAll("[data-edit-account]").forEach((button) => {
@@ -605,7 +665,9 @@ function renderAccounts() {
       collectConfig();
       editingAccountIndex = Number(button.dataset.editAccount);
       renderAccounts();
-      const row = document.querySelector(`.account-row[data-index="${editingAccountIndex}"]`);
+      const row = document.querySelector(
+        `.account-row[data-index="${editingAccountIndex}"]`,
+      );
       row?.querySelector('[data-field="name"]')?.focus();
     });
   });
@@ -650,7 +712,8 @@ function renderAccounts() {
       const index = Number(button.dataset.remove);
       const [removed] = config.accounts.splice(index, 1);
       if (editingAccountIndex === index) editingAccountIndex = null;
-      if (editingAccountIndex !== null && editingAccountIndex > index) editingAccountIndex -= 1;
+      if (editingAccountIndex !== null && editingAccountIndex > index)
+        editingAccountIndex -= 1;
       expandedCloudAccounts = shiftExpandedCloudAccounts(index);
       renderAccounts();
       if (!removed?._draft) {
@@ -701,7 +764,9 @@ function accountCloudGameHiddenFields(tokens) {
 
 function hasAccountCloudToken(account) {
   const tokens = account.cloud_games?.tokens || {};
-  return Boolean(String(tokens.genshin || "").trim() || String(tokens.zzz || "").trim());
+  return Boolean(
+    String(tokens.genshin || "").trim() || String(tokens.zzz || "").trim(),
+  );
 }
 
 function shiftExpandedCloudAccounts(removedIndex) {
@@ -726,9 +791,13 @@ function collectConfig() {
     bbs_tasks: $("bbsTasks").checked,
   };
   config.games = config.games || {};
-  config.games.enabled = Array.from(document.querySelectorAll("[data-game]:checked")).map((input) => input.dataset.game);
+  config.games.enabled = Array.from(
+    document.querySelectorAll("[data-game]:checked"),
+  ).map((input) => input.dataset.game);
   config.cloud_games = config.cloud_games || {};
-  config.cloud_games.enabled = Array.from(document.querySelectorAll("[data-cloud-game]:checked")).map((input) => input.dataset.cloudGame);
+  config.cloud_games.enabled = Array.from(
+    document.querySelectorAll("[data-cloud-game]:checked"),
+  ).map((input) => input.dataset.cloudGame);
   config.bbs = {
     ...(config.bbs || {}),
     checkin: $("bbsCheckin").checked,
@@ -740,7 +809,9 @@ function collectConfig() {
     ...(config.push || {}),
     error_only: $("pushErrorOnly").checked,
   };
-  config.push.channels = Array.from(document.querySelectorAll("[data-push-provider]"))
+  config.push.channels = Array.from(
+    document.querySelectorAll("[data-push-provider]"),
+  )
     .map((row) => collectPushChannel(row))
     .map((channel) => cleanPushChannel(channel))
     .filter((channel) => shouldSavePushChannel(channel));
@@ -749,21 +820,27 @@ function collectConfig() {
     ...(config.captcha || {}),
     max_retries: Number($("captchaMaxRetries").value || 3),
   };
-  config.captcha.channels = Array.from(document.querySelectorAll("[data-captcha-provider]"))
+  config.captcha.channels = Array.from(
+    document.querySelectorAll("[data-captcha-provider]"),
+  )
     .map((row) => collectCaptchaChannel(row))
     .filter(Boolean);
-  config.captcha.enable = config.captcha.channels.some((channel) => channel.enable);
+  config.captcha.enable = config.captcha.channels.some(
+    (channel) => channel.enable,
+  );
   config.shop_exchange = collectShopExchange();
-  config.accounts = Array.from(document.querySelectorAll(".account-row")).map((row) => {
-    const item = {};
-    row.querySelectorAll("[data-field]").forEach((field) => {
-      item[field.dataset.field] = field.value.trim();
-    });
-    item.cloud_games = collectAccountCloudGames(row);
-    item.name = (item.name || "").slice(0, 10);
-    item._draft = row.dataset.draft === "1";
-    return item;
-  });
+  config.accounts = Array.from(document.querySelectorAll(".account-row")).map(
+    (row) => {
+      const item = {};
+      row.querySelectorAll("[data-field]").forEach((field) => {
+        item[field.dataset.field] = field.value.trim();
+      });
+      item.cloud_games = collectAccountCloudGames(row);
+      item.name = (item.name || "").slice(0, 10);
+      item._draft = row.dataset.draft === "1";
+      return item;
+    },
+  );
   return config;
 }
 
@@ -774,7 +851,8 @@ function collectPushChannel(row) {
   channel.enable = Boolean(toggle?.checked);
   row.querySelectorAll("[data-push-field]").forEach((field) => {
     if (field.dataset.pushField === "smtp_ssl") {
-      channel.smtp_ssl = field.type === "checkbox" ? field.checked : field.value === "true";
+      channel.smtp_ssl =
+        field.type === "checkbox" ? field.checked : field.value === "true";
     } else if (field.type === "checkbox") {
       channel[field.dataset.pushField] = field.checked;
     } else if (field.dataset.pushField === "smtp_port") {
@@ -821,8 +899,12 @@ function renderShopConfig() {
   $("shopRetrySeconds").value = shop.retry_seconds ?? 20;
   $("shopRetryInterval").value = shop.retry_interval ?? 0.4;
   $("shopPush").checked = Boolean(shop.push ?? false);
-  if ($("shopGoodsMetric")) $("shopGoodsMetric").textContent = shopGoodsLoading ? "加载中" : String(shopGoods.length);
-  if ($("shopPlansMetric")) $("shopPlansMetric").textContent = String((shop.plans || []).length);
+  if ($("shopGoodsMetric"))
+    $("shopGoodsMetric").textContent = shopGoodsLoading
+      ? "加载中"
+      : String(shopGoods.length);
+  if ($("shopPlansMetric"))
+    $("shopPlansMetric").textContent = String((shop.plans || []).length);
   renderShopGameFilter();
   renderShopGoods();
   renderShopGoodsLoadingState();
@@ -833,7 +915,10 @@ function renderShopGameFilter() {
   const select = $("shopGameFilter");
   if (!select) return;
   select.innerHTML = shopGames
-    .map((game) => `<option value="${escapeAttr(game.key)}" ${game.key === shopSelectedGame ? "selected" : ""}>${escapeHtml(game.name)}</option>`)
+    .map(
+      (game) =>
+        `<option value="${escapeAttr(game.key)}" ${game.key === shopSelectedGame ? "selected" : ""}>${escapeHtml(game.name)}</option>`,
+    )
     .join("");
 }
 
@@ -872,9 +957,22 @@ function shopGoodCard(good, index) {
   const soldOut = isShopGoodSoldOut(good);
   const exchangeNow = canShopGoodExchangeNow(good);
   const exchanging = shopExchangeNowGoodsId === String(good.goods_id || "");
-  const exchangeLabel = good.display_status === "sold_out_with_next" ? "下次兑换" : "兑换";
-  const exchangeButtonText = exchanging ? "兑换中" : soldOut ? "已售罄" : exchangeNow ? "兑换" : "即将开启";
-  const exchangeButtonTitle = exchanging ? "正在发送兑换请求" : soldOut ? "商品已售罄" : exchangeNow ? "立即发送兑换请求" : "商品还未开启兑换";
+  const exchangeLabel =
+    good.display_status === "sold_out_with_next" ? "下次兑换" : "兑换";
+  const exchangeButtonText = exchanging
+    ? "兑换中"
+    : soldOut
+      ? "已售罄"
+      : exchangeNow
+        ? "兑换"
+        : "即将开启";
+  const exchangeButtonTitle = exchanging
+    ? "正在发送兑换请求"
+    : soldOut
+      ? "商品已售罄"
+      : exchangeNow
+        ? "立即发送兑换请求"
+        : "商品还未开启兑换";
   const image = good.icon
     ? `<img src="${escapeAttr(good.icon)}" alt="${escapeAttr(good.goods_name)}" loading="lazy" />`
     : `<div class="shop-image-fallback">无图</div>`;
@@ -910,7 +1008,9 @@ function shopGoodCard(good, index) {
 function renderShopPlans() {
   const list = $("shopPlans");
   if (!list) return;
-  document.querySelectorAll("details.shop-plan[open]").forEach((plan) => shopOpenPlans.add(plan.dataset.shopPlan));
+  document
+    .querySelectorAll("details.shop-plan[open]")
+    .forEach((plan) => shopOpenPlans.add(plan.dataset.shopPlan));
   const plans = config.shop_exchange?.plans || [];
   list.innerHTML = plans.length
     ? plans.map((plan, index) => shopPlanRow(plan, index)).join("")
@@ -930,7 +1030,8 @@ function shopPlanRow(plan, index) {
   const accountOptions = accounts.length
     ? accounts
         .map((account, accountIndex) => {
-          const selected = Number(plan.account_index || 0) === accountIndex ? "selected" : "";
+          const selected =
+            Number(plan.account_index || 0) === accountIndex ? "selected" : "";
           return `<option value="${accountIndex}" ${selected}>${escapeHtml(accountLabel(account))}</option>`;
         })
         .join("")
@@ -1010,11 +1111,17 @@ function shopPlanRow(plan, index) {
 function bindShopGoodsEvents() {
   document.querySelectorAll("[data-shop-add]").forEach((button) => {
     button.addEventListener("click", () =>
-      withButtonLoading(button, "添加中", () => addShopPlan(shopGoods[Number(button.dataset.shopAdd)]))
+      withButtonLoading(button, "添加中", () =>
+        addShopPlan(shopGoods[Number(button.dataset.shopAdd)]),
+      ),
     );
   });
   document.querySelectorAll("[data-shop-now]").forEach((button) => {
-    button.addEventListener("click", () => exchangeGoodNow(shopGoods[Number(button.dataset.shopNow)]).catch((error) => showToast(error.message)));
+    button.addEventListener("click", () =>
+      exchangeGoodNow(shopGoods[Number(button.dataset.shopNow)]).catch(
+        (error) => showToast(error.message),
+      ),
+    );
   });
 }
 
@@ -1038,15 +1145,21 @@ function bindShopPlanEvents() {
   document.querySelectorAll("[data-shop-plan-now]").forEach((button) => {
     button.addEventListener("click", () => {
       collectConfig();
-      withButtonLoading(button, "兑换中", () => exchangePlanNow(Number(button.dataset.shopPlanNow)));
+      withButtonLoading(button, "兑换中", () =>
+        exchangePlanNow(Number(button.dataset.shopPlanNow)),
+      );
     });
   });
-  document.querySelectorAll('[data-shop-plan-field="account_index"]').forEach((select) => {
-    select.addEventListener("change", () => {
-      const row = select.closest("[data-shop-plan]");
-      refreshShopPlanRole(Number(row?.dataset.shopPlan)).catch((error) => showToast(error.message));
+  document
+    .querySelectorAll('[data-shop-plan-field="account_index"]')
+    .forEach((select) => {
+      select.addEventListener("change", () => {
+        const row = select.closest("[data-shop-plan]");
+        refreshShopPlanRole(Number(row?.dataset.shopPlan)).catch((error) =>
+          showToast(error.message),
+        );
+      });
     });
-  });
 }
 
 function collectShopExchange() {
@@ -1054,8 +1167,12 @@ function collectShopExchange() {
   const shop = {
     ...(existing || {}),
     enable: Boolean($("shopEnable")?.checked ?? existing.enable ?? false),
-    retry_seconds: Number($("shopRetrySeconds")?.value || existing.retry_seconds || 20),
-    retry_interval: Number($("shopRetryInterval")?.value || existing.retry_interval || 0.4),
+    retry_seconds: Number(
+      $("shopRetrySeconds")?.value || existing.retry_seconds || 20,
+    ),
+    retry_interval: Number(
+      $("shopRetryInterval")?.value || existing.retry_interval || 0.4,
+    ),
     push: Boolean($("shopPush")?.checked ?? existing.push ?? false),
     plans: [],
   };
@@ -1064,8 +1181,10 @@ function collectShopExchange() {
     row.querySelectorAll("[data-shop-plan-field]").forEach((field) => {
       const key = field.dataset.shopPlanField;
       if (key === "enable") plan[key] = field.checked;
-      else if (key === "account_index" || key === "price") plan[key] = Number(field.value || 0);
-      else if (key === "exchange_at") plan[key] = localInputToTimestamp(field.value);
+      else if (key === "account_index" || key === "price")
+        plan[key] = Number(field.value || 0);
+      else if (key === "exchange_at")
+        plan[key] = localInputToTimestamp(field.value);
       else if (key === "auto") plan[key] = field.value !== "false";
       else plan[key] = field.value.trim();
     });
@@ -1078,15 +1197,28 @@ async function addShopPlan(good) {
   if (!good) return;
   if (isShopGoodSoldOut(good)) throw new Error("商品已售罄，不能加入兑换计划");
   collectConfig();
-  config.shop_exchange = config.shop_exchange || { enable: true, retry_seconds: 20, retry_interval: 0.4, plans: [] };
-  const firstAccountIndex = Math.max((config.accounts || []).findIndex((account) => account.stuid), 0);
+  config.shop_exchange = config.shop_exchange || {
+    enable: true,
+    retry_seconds: 20,
+    retry_interval: 0.4,
+    plans: [],
+  };
+  const firstAccountIndex = Math.max(
+    (config.accounts || []).findIndex((account) => account.stuid),
+    0,
+  );
   if (!(config.accounts || [])[firstAccountIndex]?.stuid) {
     throw new Error("请先添加并登录账号");
   }
   const plan = await buildShopPlan(good, firstAccountIndex);
-  const existingIndex = config.shop_exchange.plans.findIndex((plan) => plan.goods_id === good.goods_id);
+  const existingIndex = config.shop_exchange.plans.findIndex(
+    (plan) => plan.goods_id === good.goods_id,
+  );
   if (existingIndex >= 0) {
-    config.shop_exchange.plans[existingIndex] = { ...config.shop_exchange.plans[existingIndex], ...plan };
+    config.shop_exchange.plans[existingIndex] = {
+      ...config.shop_exchange.plans[existingIndex],
+      ...plan,
+    };
   } else {
     config.shop_exchange.plans.push(plan);
   }
@@ -1140,13 +1272,23 @@ async function exchangeGoodNow(good) {
 }
 
 async function exchangePlanNow(planOrIndex) {
-  const body = typeof planOrIndex === "number" ? { plan_index: planOrIndex } : { plan: planOrIndex };
-  if (body.plan === null || body.plan === undefined) throw new Error("兑换计划不存在");
-  const response = await api("/api/shop/exchange", { method: "POST", body: JSON.stringify(body) });
+  const body =
+    typeof planOrIndex === "number"
+      ? { plan_index: planOrIndex }
+      : { plan: planOrIndex };
+  if (body.plan === null || body.plan === undefined)
+    throw new Error("兑换计划不存在");
+  const response = await api("/api/shop/exchange", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
   const result = response.result || {};
   if (response.config) {
     config = response.config;
-    config.accounts = (config.accounts || []).map((account) => ({ ...account, _draft: false }));
+    config.accounts = (config.accounts || []).map((account) => ({
+      ...account,
+      _draft: false,
+    }));
     renderConfig();
   }
   showToast(`兑换请求完成：${result.message || "未知结果"}`);
@@ -1155,7 +1297,9 @@ async function exchangePlanNow(planOrIndex) {
 
 async function buildShopPlan(good, accountIndex) {
   const fpData = await api("/api/shop/device-fp");
-  const detail = await api(`/api/shop/good-detail?goods_id=${encodeURIComponent(good.goods_id)}`);
+  const detail = await api(
+    `/api/shop/good-detail?goods_id=${encodeURIComponent(good.goods_id)}`,
+  );
   const base = { ...good, ...detail };
   const plan = {
     enable: true,
@@ -1183,7 +1327,9 @@ async function buildShopPlan(good, accountIndex) {
     if (!plan.game_biz) {
       throw new Error("商品详情缺少 game_biz，无法自动匹配游戏角色");
     }
-    const meta = await api(`/api/shop/account-meta?account_index=${accountIndex}&game_biz=${encodeURIComponent(plan.game_biz)}`);
+    const meta = await api(
+      `/api/shop/account-meta?account_index=${accountIndex}&game_biz=${encodeURIComponent(plan.game_biz)}`,
+    );
     const role = (meta.roles || [])[0];
     if (!role) {
       throw new Error("未找到该商品对应的绑定游戏角色");
@@ -1200,7 +1346,9 @@ async function refreshShopPlanRole(index) {
   collectConfig();
   const plan = config.shop_exchange?.plans?.[index];
   if (!plan || !plan.game_biz) return;
-  const meta = await api(`/api/shop/account-meta?account_index=${plan.account_index}&game_biz=${encodeURIComponent(plan.game_biz)}`);
+  const meta = await api(
+    `/api/shop/account-meta?account_index=${plan.account_index}&game_biz=${encodeURIComponent(plan.game_biz)}`,
+  );
   const role = (meta.roles || [])[0];
   if (!role) {
     plan.uid = "";
@@ -1226,7 +1374,9 @@ function shopRoleDisplay(plan) {
 
 function shopServerDisplay(plan) {
   if (!plan.region && !plan.game_biz) return "不需要";
-  const readable = plan.region_name ? `${plan.region_name}${plan.region ? ` (${plan.region})` : ""}` : plan.region;
+  const readable = plan.region_name
+    ? `${plan.region_name}${plan.region ? ` (${plan.region})` : ""}`
+    : plan.region;
   return [readable, plan.game_biz].filter(Boolean).join(" / ");
 }
 
@@ -1268,7 +1418,10 @@ function chooseShopExchangeAccount(good) {
           <span>执行账号</span>
           <select id="shopExchangeAccountSelect">
             ${choices
-              .map(({ account, index }) => `<option value="${index}">${escapeHtml(accountLabel(account))}</option>`)
+              .map(
+                ({ account, index }) =>
+                  `<option value="${index}">${escapeHtml(accountLabel(account))}</option>`,
+              )
               .join("")}
           </select>
         </label>
@@ -1290,7 +1443,9 @@ function chooseShopExchangeAccount(good) {
     overlay.querySelectorAll("[data-modal-cancel]").forEach((control) => {
       control.addEventListener("click", () => finish(null));
     });
-    overlay.querySelector("[data-modal-confirm]")?.addEventListener("click", () => finish(Number(select.value)));
+    overlay
+      .querySelector("[data-modal-confirm]")
+      ?.addEventListener("click", () => finish(Number(select.value)));
     overlay.addEventListener("click", (event) => {
       if (event.target === overlay) finish(null);
     });
@@ -1355,7 +1510,14 @@ function localInputToTimestamp(value) {
   const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
   if (!match) return 0;
   const [, year, month, day, hour, minute] = match;
-  const timestamp = Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour) - 8, Number(minute), 0);
+  const timestamp = Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour) - 8,
+    Number(minute),
+    0,
+  );
   return Number.isFinite(timestamp) ? Math.floor(timestamp / 1000) : 0;
 }
 
@@ -1443,7 +1605,11 @@ async function refreshStatus() {
   const accounts = config?.accounts || [];
   const loggedIn = accounts.filter((account) => account.stuid).length;
   $("accountMetric").textContent = `${loggedIn}/${accounts.length}`;
-  $("scheduleMetric").textContent = scheduler.running ? "执行中" : scheduler.enabled ? "已启用" : "已关闭";
+  $("scheduleMetric").textContent = scheduler.running
+    ? "执行中"
+    : scheduler.enabled
+      ? "已启用"
+      : "已关闭";
   $("nextRun").textContent = formatTime(scheduler.next_run);
   $("lastResult").textContent = latestResultText(scheduler, login, logs);
   if ($("shopScheduleMetric")) {
@@ -1456,7 +1622,12 @@ async function refreshStatus() {
   if ($("shopNextRun")) {
     $("shopNextRun").textContent = formatTime(exchangeScheduler.next_run);
   }
-  if (shopExchange && config && !shopRequestInFlight && !isEditingShopConfig()) {
+  if (
+    shopExchange &&
+    config &&
+    !shopRequestInFlight &&
+    !isEditingShopConfig()
+  ) {
     config.shop_exchange = shopExchange;
     renderShopConfig();
   }
@@ -1484,7 +1655,11 @@ async function refreshStatus() {
 
 function isEditingShopConfig() {
   const active = document.activeElement;
-  return Boolean(active?.matches?.("[data-shop-plan-field], #shopEnable, #shopRetrySeconds, #shopRetryInterval"));
+  return Boolean(
+    active?.matches?.(
+      "[data-shop-plan-field], #shopEnable, #shopRetrySeconds, #shopRetryInterval",
+    ),
+  );
 }
 
 function renderLoginSlot(login) {
@@ -1492,7 +1667,12 @@ function renderLoginSlot(login) {
     slot.innerHTML = "";
     slot.classList.remove("active");
   });
-  if (!login.running && !login.qr && login.status !== "error" && activeLoginIndex === null) {
+  if (
+    !login.running &&
+    !login.qr &&
+    login.status !== "error" &&
+    activeLoginIndex === null
+  ) {
     return;
   }
   const index = login.account_index ?? activeLoginIndex ?? -1;
@@ -1583,7 +1763,9 @@ function addAccount() {
   config.accounts.push(emptyAccount(nextAccountName()));
   editingAccountIndex = config.accounts.length - 1;
   renderAccounts();
-  const row = document.querySelector(`.account-row[data-index="${editingAccountIndex}"]`);
+  const row = document.querySelector(
+    `.account-row[data-index="${editingAccountIndex}"]`,
+  );
   row?.querySelector('[data-field="name"]')?.focus();
 }
 
@@ -1604,7 +1786,9 @@ function emptyAccountCloudGames() {
 }
 
 function nextAccountName() {
-  const names = new Set((config.accounts || []).map((account) => account.name).filter(Boolean));
+  const names = new Set(
+    (config.accounts || []).map((account) => account.name).filter(Boolean),
+  );
   for (let index = 1; index < 1000; index += 1) {
     const name = `账号${index}`;
     if (!names.has(name)) return name;
@@ -1646,19 +1830,27 @@ function latestResultText(scheduler, login, logs) {
   if (scheduler.running) return "正在签到";
   if (scheduler.last_error) return "任务失败";
   const latest = [...logs].reverse().find((line) => {
-    return /任务汇总|签到汇总|签到成功|社区任务结束|获得|任务执行完成|登录成功|失败|触发验证码/.test(line);
+    return /任务汇总|签到汇总|签到成功|社区任务结束|获得|任务执行完成|登录成功|失败|触发验证码/.test(
+      line,
+    );
   });
   if (latest) {
     if (latest.includes("云游戏成功项")) return "云游戏成功";
     if (latest.includes("云游戏失败项")) return "云游戏部分失败";
-    if (latest.includes("游戏社区成功项") || latest.includes("游戏成功项")) return "社区签到成功";
-    if (latest.includes("游戏社区失败项") || latest.includes("游戏失败项")) return "社区部分失败";
+    if (latest.includes("游戏社区成功项") || latest.includes("游戏成功项"))
+      return "社区签到成功";
+    if (latest.includes("游戏社区失败项") || latest.includes("游戏失败项"))
+      return "社区部分失败";
     if (latest.includes("米游币任务汇总")) {
       const points = latest.match(/实际已获得\s*([^，\s]+)/);
       return points ? `米游币 ${points[1]}` : "米游币完成";
     }
-    if (latest.includes("云游戏签到汇总")) return latest.includes("失败 0") ? "云游戏成功" : "云游戏部分失败";
-    if (latest.includes("游戏社区签到汇总") || latest.includes("游戏签到汇总")) {
+    if (latest.includes("云游戏签到汇总"))
+      return latest.includes("失败 0") ? "云游戏成功" : "云游戏部分失败";
+    if (
+      latest.includes("游戏社区签到汇总") ||
+      latest.includes("游戏签到汇总")
+    ) {
       return latest.includes("失败 0") ? "社区签到成功" : "社区部分失败";
     }
     if (latest.includes("社区任务结束")) {
@@ -1672,7 +1864,8 @@ function latestResultText(scheduler, login, logs) {
     if (latest.includes("失败")) return "任务失败";
     if (latest.includes("获得")) return "奖励已获取";
   }
-  if (login.status && login.status !== "idle") return loginStatusText(login.status);
+  if (login.status && login.status !== "idle")
+    return loginStatusText(login.status);
   if (scheduler.last_run) return "任务完成";
   return "-";
 }
@@ -1715,7 +1908,10 @@ function switchView(view) {
     panel.classList.toggle("is-hidden", panel.dataset.viewPanel !== activeView);
   });
   document.querySelectorAll("[data-view-actions]").forEach((actions) => {
-    actions.classList.toggle("is-hidden", actions.dataset.viewActions !== activeView);
+    actions.classList.toggle(
+      "is-hidden",
+      actions.dataset.viewActions !== activeView,
+    );
   });
   if (activeView === "shop" && !shopGoods.length) {
     loadShopGoods().catch((error) => showToast(error.message));
@@ -1723,12 +1919,18 @@ function switchView(view) {
 }
 
 function bindEvents() {
-  document.querySelectorAll("summary button, summary input").forEach((control) => {
-    control.addEventListener("click", (event) => event.stopPropagation());
-  });
+  document
+    .querySelectorAll("summary button, summary input")
+    .forEach((control) => {
+      control.addEventListener("click", (event) => event.stopPropagation());
+    });
   document.addEventListener("change", (event) => {
     if (event.target?.matches?.("[data-autosave]")) {
-      if (event.target.id === "gameCheckin" || event.target.id === "cloudGameCheckin" || event.target.id === "bbsTasks") {
+      if (
+        event.target.id === "gameCheckin" ||
+        event.target.id === "cloudGameCheckin" ||
+        event.target.id === "bbsTasks"
+      ) {
         updateTaskDependencyState();
       }
       scheduleAutoSave();
@@ -1737,16 +1939,20 @@ function bindEvents() {
   document.addEventListener("input", (event) => {
     if (
       event.target?.matches?.(
-        'input[type="time"][data-autosave], input[type="datetime-local"][data-autosave], input[type="number"][data-autosave], input[type="text"][data-autosave], select[data-autosave], [data-account-cloud-token][data-autosave]'
+        'input[type="time"][data-autosave], input[type="datetime-local"][data-autosave], input[type="number"][data-autosave], input[type="text"][data-autosave], select[data-autosave], [data-account-cloud-token][data-autosave]',
       )
     ) {
       scheduleAutoSave();
     }
   });
   $("refreshBtn").addEventListener("click", () => {
-    Promise.all([loadConfig(), refreshStatus()]).catch((error) => showToast(error.message));
+    Promise.all([loadConfig(), refreshStatus()]).catch((error) =>
+      showToast(error.message),
+    );
   });
-  $("runBtn").addEventListener("click", () => runNow().catch((error) => showToast(error.message)));
+  $("runBtn").addEventListener("click", () =>
+    runNow().catch((error) => showToast(error.message)),
+  );
   $("logs").addEventListener("scroll", () => {
     logsPinnedToBottom = isScrolledNearBottom($("logs"));
   });
@@ -1758,8 +1964,12 @@ function bindEvents() {
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => switchView(button.dataset.view));
   });
-  $("shopRefreshBtn")?.addEventListener("click", () => loadShopGoods().catch((error) => showToast(error.message)));
-  $("shopGameFilter")?.addEventListener("change", () => loadShopGoods().catch((error) => showToast(error.message)));
+  $("shopRefreshBtn")?.addEventListener("click", () =>
+    loadShopGoods().catch((error) => showToast(error.message)),
+  );
+  $("shopGameFilter")?.addEventListener("change", () =>
+    loadShopGoods().catch((error) => showToast(error.message)),
+  );
 }
 
 bindEvents();

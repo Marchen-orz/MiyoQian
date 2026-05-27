@@ -103,7 +103,6 @@ def _send_exchange(
     """发送商品兑换推送"""
     token = str(push.get("token") or "").strip()
     webhook = str(push.get("webhook") or "").strip()
-    api_url = str(push.get("api_url") or "").strip()
     topic = str(push.get("topic") or "").strip()
     chat_id = str(push.get("chat_id") or "").strip()
     secret = str(push.get("secret") or "").strip()
@@ -117,7 +116,7 @@ def _send_exchange(
 
     if provider == "pushplus":
         require(token, "token")
-        url = api_url or "https://www.pushplus.plus/send"
+        url = "https://www.pushplus.plus/send"
         payload = pushplus_payload(
             token, title, build_exchange_html(title, goods_name, result, plan, success), "html", topic
         )
@@ -133,7 +132,7 @@ def _send_exchange(
     if provider == "telegram":
         require(token, "token")
         require(chat_id, "chat_id")
-        url = api_url or f"https://api.telegram.org/bot{token}/sendMessage"
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
         request_json(
             client,
             "POST",
@@ -195,7 +194,6 @@ def _send_exchange(
 def _send(client: httpx.Client, provider: str, push: dict[str, Any], title: str, message: str, success: bool) -> None:
     token = str(push.get("token") or "").strip()
     webhook = str(push.get("webhook") or "").strip()
-    api_url = str(push.get("api_url") or "").strip()
     topic = str(push.get("topic") or "").strip()
     chat_id = str(push.get("chat_id") or "").strip()
     secret = str(push.get("secret") or "").strip()
@@ -211,7 +209,7 @@ def _send(client: httpx.Client, provider: str, push: dict[str, Any], title: str,
 
     if provider == "pushplus":
         require(token, "token")
-        url = api_url or "https://www.pushplus.plus/send"
+        url = "https://www.pushplus.plus/send"
         payload = pushplus_payload(token, title, build_push_html(title, message, success), "html", topic)
         try:
             request_json(client, "POST", url, json=payload)
@@ -222,7 +220,7 @@ def _send(client: httpx.Client, provider: str, push: dict[str, Any], title: str,
     if provider == "telegram":
         require(token, "token")
         require(chat_id, "chat_id")
-        url = api_url or f"https://api.telegram.org/bot{token}/sendMessage"
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
         request_json(
             client,
             "POST",
