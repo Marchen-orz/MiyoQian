@@ -1219,6 +1219,10 @@ async function addShopPlan(good) {
   if (!good) return;
   if (!canShopGoodAddPlan(good))
     throw new Error("商品已售罄，不能加入兑换计划");
+
+  const accountIndex = await chooseShopPlanAccount(good);
+  if (accountIndex === null) return;
+
   collectConfig();
   config.shop_exchange = config.shop_exchange || {
     enable: true,
@@ -1226,25 +1230,29 @@ async function addShopPlan(good) {
     retry_interval: 0.4,
     plans: [],
   };
-  const firstAccountIndex = Math.max(
-    (config.accounts || []).findIndex((account) => account.stuid),
-    0,
-  );
-  if (!(config.accounts || [])[firstAccountIndex]?.stuid) {
+
+  if (!(config.accounts || [])[accountIndex]?.stuid) {
     throw new Error("请先添加并登录账号");
   }
-  const plan = await buildShopPlan(good, firstAccountIndex);
+
   const existingIndex = config.shop_exchange.plans.findIndex(
-    (plan) => plan.goods_id === good.goods_id,
+    (p) => p.goods_id === good.goods_id && p.account_index === accountIndex,
   );
+
   if (existingIndex >= 0) {
-    config.shop_exchange.plans[existingIndex] = {
-      ...config.shop_exchange.plans[existingIndex],
-      ...plan,
-    };
-  } else {
-    config.shop_exchange.plans.push(plan);
+    showToast("同账号已有相同计划");
+    return;
   }
+
+  const accountName = accountLabel(config.accounts[accountIndex]);
+  const checkError = await checkShopAccountLogin(accountIndex);
+  if (checkError) {
+    showToast(`${accountName} 登录已过期，请重新登录`);
+    return;
+  }
+
+  const plan = await buildShopPlan(good, accountIndex);
+  config.shop_exchange.plans.push(plan);
   const planIndex = config.shop_exchange.plans.length - 1;
   renderShopPlans();
   // 只为新添加的计划加载地址并自动填充
@@ -1565,6 +1573,91 @@ function chooseShopExchangeAccount(good) {
     });
     select.focus();
   });
+}
+
+function chooseShopPlanAccount(good) {
+  const choices = loggedInAccountChoices();
+  if (!choices.length) {
+    throw new Error("请先添加并登录账号");
+  }
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = `
+      <div class="modal-card shop-account-dialog" role="dialog" aria-modal="true" aria-labelledby="shopPlanDialogTitle">
+        <div class="modal-head">
+          <div>
+            <h2 id="shopPlanDialogTitle">选择计划账号</h2>
+            <p>${escapeHtml(good.goods_name || "商品兑换计划")}</p>
+          </div>
+          <button class="ghost icon-only" type="button" data-modal-cancel title="关闭">
+            <svg><use href="#i-x"></use></svg>
+          </button>
+        </div>
+        <label>
+          <span>执行账号</span>
+          <select id="shopPlanAccountSelect">
+            ${choices
+              .map(
+                ({ account, index }) =>
+                  `<option value="${index}">${escapeHtml(accountLabel(account))}</option>`,
+              )
+              .join("")}
+          </select>
+        </label>
+        <div class="modal-actions">
+          <button class="ghost" type="button" data-modal-cancel>取消</button>
+          <button class="primary" type="button" data-modal-confirm>
+            <svg><use href="#i-plus"></use></svg>
+            <span>添加计划</span>
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.insertBefore(overlay, document.querySelector(".toast"));
+    const select = overlay.querySelector("#shopPlanAccountSelect");
+    const finish = (value) => {
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.querySelectorAll("[data-modal-cancel]").forEach((control) => {
+      control.addEventListener("click", () => finish(null));
+    });
+    overlay
+      .querySelector("[data-modal-confirm]")
+      ?.addEventListener("click", () => finish(Number(select.value)));
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) finish(null);
+    });
+    overlay.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") finish(null);
+      if (event.key === "Enter") finish(Number(select.value));
+    });
+    select.focus();
+  });
+}
+
+async function checkShopAccountLogin(accountIndex) {
+  try {
+    const meta = await api(
+      `/api/shop/account-meta?account_index=${accountIndex}`,
+    );
+    const errors = [
+      meta.points_error || "",
+      meta.addresses_error || "",
+    ];
+    for (const err of errors) {
+      if (/未登录|登录失效|cookie.*过期|expired/i.test(err)) {
+        return err;
+      }
+    }
+    return null;
+  } catch (error) {
+    if (/未登录|登录失效|cookie.*过期|expired/i.test(error.message)) {
+      return error.message;
+    }
+    return null;
+  }
 }
 
 async function withButtonLoading(button, loadingText, task) {
