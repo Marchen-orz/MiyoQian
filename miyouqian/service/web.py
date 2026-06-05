@@ -919,6 +919,13 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/":
             path = "/index.html"
         relative = pathlib.Path(unquote(path).lstrip("/"))
+        # 移除版本参数（如 /app.js?v=123 -> /app.js）
+        if len(relative.parts) > 0:
+            file_part = relative.parts[-1]
+            if "?" in file_part:
+                file_part = file_part.split("?")[0]
+                relative = pathlib.Path(*relative.parts[:-1], file_part)
+
         target = (WEB_ROOT / relative).resolve()
         root = WEB_ROOT.resolve()
         if root not in target.parents and target != root:
@@ -929,9 +936,31 @@ class Handler(BaseHTTPRequestHandler):
             return
         content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
         data = target.read_bytes()
+
+        # 如果是 HTML 文件，给静态资源添加版本号
+        if content_type == "text/html":
+            html_content = data.decode("utf-8")
+            app_js_path = WEB_ROOT / "app.js"
+            if app_js_path.exists():
+                mtime = int(app_js_path.stat().st_mtime)
+                html_content = html_content.replace('src="/app.js"', f'src="/app.js?v={mtime}"')
+            data = html_content.encode("utf-8")
+
+        # 生成 ETag（基于文件内容和修改时间）
+        mtime = target.stat().st_mtime
+        size = target.stat().st_size
+        etag = f'"{int(mtime)}-{size}"'
+
+        # 检查 If-None-Match 头
+        if self.headers.get("If-None-Match") == etag:
+            self.send_response(HTTPStatus.NOT_MODIFIED)
+            self.end_headers()
+            return
+
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", f"{content_type}; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("ETag", etag)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
