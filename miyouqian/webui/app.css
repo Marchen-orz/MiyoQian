@@ -526,6 +526,20 @@ textarea:focus {
   color: var(--text);
 }
 
+.check-row.disabled {
+  color: var(--muted);
+  background: #f7fafc;
+  cursor: help;
+}
+
+.check-row.disabled span {
+  color: var(--muted);
+}
+
+.check-row.disabled input {
+  cursor: not-allowed;
+}
+
 .chips {
   display: flex;
   flex-wrap: wrap;
@@ -802,6 +816,48 @@ textarea:focus {
 .inline-login p {
   color: var(--muted);
   overflow-wrap: anywhere;
+}
+
+.login-method-panel,
+.captcha-login-panel {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.login-method-actions,
+.captcha-login-actions,
+.captcha-code-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.login-method-actions {
+  flex-wrap: wrap;
+}
+
+.captcha-login-fields {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.captcha-code-row input {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.captcha-code-row button {
+  flex: 0 0 auto;
+}
+
+.login-panel-message {
+  margin: 0;
+  color: var(--muted);
+}
+
+.login-panel-message.error {
+  color: var(--danger);
 }
 
 .empty-state {
@@ -1160,6 +1216,16 @@ textarea:focus {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.geetest-dialog {
+  width: min(360px, calc(100vw - 32px));
+}
+
+.geetest-box {
+  min-height: 260px;
+  display: grid;
+  place-items: center;
 }
 
 .toast {

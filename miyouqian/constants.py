@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """接口常量与业务映射。"""
 
-BBS_VERSION = "2.99.1"
+BBS_VERSION = "2.106.2"
 QR_LOGIN_VERSION = "2.102.1"
 PASSPORT_APP_VERSION = "2.90.1"
 
-BBS_SALT = "b0EofkfMKq2saWV9fwux18J5vzcFTlex"
-BBS_WEB_SALT = "DlOUwIupfU6YespEUWDJmXtutuXV6owG"
+BBS_SALT = "idMMaGYmVgPzh3wxmWudUXKUPGidO7GM"
+BBS_WEB_SALT = "G1ktdwFL4IyGkHuuWSmz0wUe9Db9scyK"
 BBS_X6_SALT = "t0qEgfub6cvueAPgR5m9aQWWVciEer7v"
 PASSPORT_X4_SALT = "xV8v4Qu54lUKrEYFZkJhB8cuOh9Asafs"
 PASSPORT_APP_SALT = "dDIQHbKOdaPaLuvQKVzUzqdeCaxjtaPV"
@@ -47,6 +47,8 @@ DEVICE_FP_URL = "https://public-data-api.mihoyo.com/device-fp/api/getFp"
 
 QRCODE_FETCH_URL = f"{PASSPORT_API}/account/ma-cn-passport/app/createQRLogin"
 QRCODE_QUERY_URL = f"{PASSPORT_API}/account/ma-cn-passport/app/queryQRLoginStatus"
+LOGIN_CAPTCHA_URL = f"{PASSPORT_API}/account/ma-cn-verifier/verifier/createLoginCaptcha"
+LOGIN_BY_MOBILE_CAPTCHA_URL = f"{PASSPORT_API}/account/ma-cn-passport/app/loginByMobileCaptcha"
 LTOKEN_BY_STOKEN_URL = f"{PASSPORT_API}/account/auth/api/getLTokenBySToken"
 COOKIE_TOKEN_BY_STOKEN_URL = (
     f"{PASSPORT_API}/account/auth/api/getCookieAccountInfoBySToken"

@@ -32,10 +32,10 @@ def stoken_cookie(account: dict[str, Any]) -> str:
     mid = str(account.get("mid") or guess_mid(account.get("cookie", "")))
     if not uid or not stoken:
         raise ValueError("缺少 stuid/stoken，无法执行米游币社区任务")
+    if stoken.startswith("v2_") and not mid:
+        raise ValueError("v2 stoken 需要 mid，请重新扫码登录")
     items = [f"stuid={uid}", f"stoken={stoken}"]
-    if stoken.startswith("v2_"):
-        if not mid:
-            raise ValueError("v2 stoken 需要 mid，请重新扫码登录")
+    if mid:
         items.append(f"mid={mid}")
     return ";".join(items)
 

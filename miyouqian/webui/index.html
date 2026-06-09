@@ -33,6 +33,10 @@
         <path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z"></path>
         <path d="M14 14h2v2h-2zM18 14h2v4h-2zM14 18h4v2h-4z"></path>
       </symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24">
+        <path d="M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z"></path>
+        <path d="M11 18h2"></path>
+      </symbol>
       <symbol id="i-cloud" viewBox="0 0 24 24">
         <path
           d="M17.5 19H8a5 5 0 1 1 1.1-9.9A6.5 6.5 0 0 1 21 12.8 3.6 3.6 0 0 1 17.5 19Z"
@@ -114,7 +118,7 @@
               <summary>
                 <span>
                   <strong>账号</strong>
-                  <small>添加后扫码登录</small>
+                  <small>添加后登录</small>
                 </span>
                 <span class="disclosure" aria-hidden="true"></span>
               </summary>
@@ -167,21 +171,27 @@
                       data-autosave
                     /><span>社区签到</span></label
                   >
-                  <label class="check-row"
-                    ><input id="bbsRead" type="checkbox" data-autosave /><span
-                      >看帖</span
-                    ></label
+                  <label
+                    class="check-row disabled"
+                    title="米游社改版，社区互动已无法获取米游币，待新获取方式更新~"
                   >
-                  <label class="check-row"
-                    ><input id="bbsLike" type="checkbox" data-autosave /><span
-                      >点赞</span
-                    ></label
+                    <input id="bbsRead" type="checkbox" data-autosave disabled />
+                    <span>看帖</span>
+                  </label>
+                  <label
+                    class="check-row disabled"
+                    title="米游社改版，社区互动已无法获取米游币，待新获取方式更新~"
                   >
-                  <label class="check-row"
-                    ><input id="bbsShare" type="checkbox" data-autosave /><span
-                      >分享</span
-                    ></label
+                    <input id="bbsLike" type="checkbox" data-autosave disabled />
+                    <span>点赞</span>
+                  </label>
+                  <label
+                    class="check-row disabled"
+                    title="米游社改版，社区互动已无法获取米游币，待新获取方式更新~"
                   >
+                    <input id="bbsShare" type="checkbox" data-autosave disabled />
+                    <span>分享</span>
+                  </label>
                 </div>
               </div>
             </details>

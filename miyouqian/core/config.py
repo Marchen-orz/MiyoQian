@@ -55,9 +55,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "bbs": {
         "forums": [5, 2],
         "checkin": True,
-        "read": True,
-        "like": True,
-        "share": True,
+        "read": False,
+        "like": False,
+        "share": False,
         "cancel_like": True,
         "post_limit": 5,
         "delay_seconds": [1, 3],
@@ -177,6 +177,14 @@ def normalize_config(config: dict[str, Any]) -> None:
     features.setdefault("game_checkin", True)
     features.setdefault("cloud_game_checkin", False)
     features.setdefault("bbs_tasks", False)
+    bbs = config.setdefault("bbs", {})
+    if not isinstance(bbs, dict):
+        bbs = {}
+        config["bbs"] = bbs
+    bbs["checkin"] = parse_bool(bbs.get("checkin", True))
+    bbs["read"] = False
+    bbs["like"] = False
+    bbs["share"] = False
     normalize_shop_exchange(config)
 
 

@@ -27,7 +27,19 @@ class ApiClient:
     def post_json(self, url: str, **kwargs: Any) -> dict[str, Any]:
         return self._request_json("POST", url, **kwargs)
 
+    def get_json_with_headers(self, url: str, **kwargs: Any) -> tuple[dict[str, Any], httpx.Headers]:
+        return self._request_json_with_headers("GET", url, **kwargs)
+
+    def post_json_with_headers(self, url: str, **kwargs: Any) -> tuple[dict[str, Any], httpx.Headers]:
+        return self._request_json_with_headers("POST", url, **kwargs)
+
     def _request_json(self, method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        data, _headers = self._request_json_with_headers(method, url, **kwargs)
+        return data
+
+    def _request_json_with_headers(
+        self, method: str, url: str, **kwargs: Any
+    ) -> tuple[dict[str, Any], httpx.Headers]:
         try:
             response = self._client.request(method, url, **kwargs)
             response.raise_for_status()
@@ -38,7 +50,7 @@ class ApiClient:
             raise ApiError(f"接口返回不是 JSON: {url}") from exc
         if not isinstance(data, dict):
             raise ApiError(f"接口返回格式异常: {url}")
-        return data
+        return data, response.headers
 
     def close(self) -> None:
         self._client.close()

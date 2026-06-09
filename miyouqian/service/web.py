@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import qrcode
 
-from ..auth.login import QRLogin, _QrRefreshed
+from ..auth.login import AigisRequired, CaptchaLogin, QRLogin, _QrRefreshed
 from ..core import cookies
 from ..core.config import load_config, log_path, normalize_config, save_config, validate_unique_account_uids
 from ..core.http import ApiClient
@@ -499,6 +499,114 @@ class WebApp:
         thread.start()
         self.log(f"账号 {account_name} 开始扫码登录", "auth")
 
+    def send_login_captcha(
+        self,
+        account_index: int,
+        phone: str,
+        account_payload: dict[str, Any] | None = None,
+        draft: bool = False,
+        aigis: str = "",
+    ) -> dict[str, str]:
+        phone = normalize_cn_phone(phone)
+        account_snapshot, account_name = self._login_account_snapshot(account_index, account_payload, draft)
+        with self.lock:
+            if self.login_state.get("running"):
+                raise RuntimeError("扫码登录正在进行")
+            device = dict(self.config["device"])
+        with ApiClient() as client:
+            login = CaptchaLogin(client, str(device["id"]), str(device["fp"]))
+            result = login.create_captcha(phone, aigis)
+        self.log(f"账号 {account_name} 已发送验证码", "auth")
+        return result
+
+    def complete_login_captcha(
+        self,
+        account_index: int,
+        phone: str,
+        captcha: str,
+        action_type: str,
+        account_payload: dict[str, Any] | None = None,
+        draft: bool = False,
+        aigis: str = "",
+    ) -> dict[str, Any]:
+        phone = normalize_cn_phone(phone)
+        captcha = str(captcha or "").strip()
+        action_type = str(action_type or "").strip()
+        if not captcha:
+            raise ValueError("请输入短信验证码")
+        if not action_type:
+            raise ValueError("请先发送短信验证码")
+        account_snapshot, account_name = self._login_account_snapshot(account_index, account_payload, draft)
+        with self.lock:
+            if self.login_state.get("running"):
+                raise RuntimeError("扫码登录正在进行")
+            device = dict(self.config["device"])
+        with ApiClient() as client:
+            login = CaptchaLogin(client, str(device["id"]), str(device["fp"]))
+            token_data = login.login_by_mobile_captcha(phone, captcha, action_type, aigis)
+            account_data = self._complete_login_data(login, token_data)
+        account = self._save_login_account(account_index, account_snapshot, account_data, draft)
+        account_name = display_account_name(account)
+        if draft:
+            self.log(f"账号 {account_name} 验证码登录成功，等待保存", "auth")
+        else:
+            self.log(f"账号 {account_name} 验证码登录成功，凭证已保存", "auth")
+        return {
+            "account_index": account_index,
+            "draft": draft,
+            "message": f"账号 {account_name} 登录成功" + ("，请保存账号" if draft else ""),
+            "account_data": account_data,
+        }
+
+    def _login_account_snapshot(
+        self,
+        account_index: int,
+        account_payload: dict[str, Any] | None,
+        draft: bool,
+    ) -> tuple[dict[str, Any], str]:
+        with self.lock:
+            accounts = self.config.get("accounts") or []
+            if not draft and (account_index < 0 or account_index >= len(accounts)):
+                raise ValueError("请先添加账号")
+            account_snapshot = dict(account_payload or {})
+            if not draft:
+                account_snapshot = dict(accounts[account_index])
+            account_name = display_account_name(account_snapshot)
+        return account_snapshot, account_name
+
+    def _complete_login_data(self, login: QRLogin | CaptchaLogin, token_data: dict[str, str]) -> dict[str, str]:
+        account_data = {**token_data, **login.get_additional_tokens(token_data["stoken"], token_data["mid"])}
+        account_data["cookie"] = cookies.build_cookie(
+            account_data["stuid"],
+            account_data["mid"],
+            account_data["ltoken"],
+            account_data["cookie_token"],
+        )
+        return account_data
+
+    def _save_login_account(
+        self,
+        account_index: int,
+        account_snapshot: dict[str, Any],
+        account_data: dict[str, str],
+        draft: bool,
+    ) -> dict[str, Any]:
+        with self.lock:
+            new_uid = str(account_data.get("stuid") or "").strip()
+            duplicate = find_duplicate_uid(self.config.get("accounts") or [], new_uid, None if draft else account_index)
+            if duplicate is not None:
+                raise ValueError(f"UID {new_uid} 已存在，不能重复添加同一账号")
+            account = {**account_snapshot, **account_data}
+            if not str(account.get("name") or "").strip():
+                account["name"] = account_data["stuid"]
+            if not draft:
+                self.config["accounts"][account_index] = account
+                save_config(self.config_path, self.config)
+                self.log_file = log_path(self.config_path, self.config)
+                configure_logger(self.log_file)
+                self.scheduler.reload(self.config)
+        return account
+
     def _login_worker(
         self,
         account_index: int,
@@ -532,27 +640,9 @@ class WebApp:
                     return
                 with self.lock:
                     self.login_state.update({"status": "exchanging", "message": "正在获取完整凭证"})
-                account_data = {**scan, **login.get_additional_tokens(scan["stoken"], scan["mid"])}
-                account_data["cookie"] = cookies.build_cookie(
-                    account_data["stuid"],
-                    account_data["mid"],
-                    account_data["ltoken"],
-                    account_data["cookie_token"],
-                )
+                account_data = self._complete_login_data(login, scan)
+            account = self._save_login_account(account_index, account_snapshot, account_data, draft)
             with self.lock:
-                new_uid = str(account_data.get("stuid") or "").strip()
-                duplicate = find_duplicate_uid(self.config.get("accounts") or [], new_uid, None if draft else account_index)
-                if duplicate is not None:
-                    raise ValueError(f"UID {new_uid} 已存在，不能重复添加同一账号")
-                account = {**account_snapshot, **account_data}
-                if not str(account.get("name") or "").strip():
-                    account["name"] = account_data["stuid"]
-                if not draft:
-                    self.config["accounts"][account_index] = account
-                    save_config(self.config_path, self.config)
-                    self.log_file = log_path(self.config_path, self.config)
-                    configure_logger(self.log_file)
-                    self.scheduler.reload(self.config)
                 account_name = display_account_name(account)
                 if self._login_generation == generation:
                     self.login_state.update(
@@ -638,6 +728,13 @@ def make_qr_data_uri(text: str) -> str:
 
 def display_account_name(account: dict[str, Any]) -> str:
     return str(account.get("name") or account.get("stuid") or "未命名账号")
+
+
+def normalize_cn_phone(phone: str) -> str:
+    digits = "".join(char for char in str(phone or "") if char.isdigit())
+    if len(digits) != 11:
+        raise ValueError("请输入 11 位手机号")
+    return digits
 
 
 def find_duplicate_uid(accounts: list[dict[str, Any]], uid: str, exclude_index: int | None = None) -> int | None:
@@ -887,6 +984,36 @@ class Handler(BaseHTTPRequestHandler):
                 self.app.start_login(account_index, timeout, account_payload, bool(payload.get("draft")))
                 self.send_json({"ok": True})
                 return
+            if path == "/api/login/captcha/send":
+                account_index = int(payload.get("account_index", -1))
+                account_payload = payload.get("account")
+                if account_payload is not None and not isinstance(account_payload, dict):
+                    raise ValueError("账号数据必须是 JSON 对象")
+                result = self.app.send_login_captcha(
+                    account_index,
+                    str(payload.get("phone") or ""),
+                    account_payload,
+                    bool(payload.get("draft")),
+                    str(payload.get("aigis") or ""),
+                )
+                self.send_json({"ok": True, **result})
+                return
+            if path == "/api/login/captcha/verify":
+                account_index = int(payload.get("account_index", -1))
+                account_payload = payload.get("account")
+                if account_payload is not None and not isinstance(account_payload, dict):
+                    raise ValueError("账号数据必须是 JSON 对象")
+                result = self.app.complete_login_captcha(
+                    account_index,
+                    str(payload.get("phone") or ""),
+                    str(payload.get("captcha") or ""),
+                    str(payload.get("action_type") or ""),
+                    account_payload,
+                    bool(payload.get("draft")),
+                    str(payload.get("aigis") or ""),
+                )
+                self.send_json({"ok": True, **result})
+                return
             if path == "/api/login/refresh":
                 self.app.refresh_login_qr()
                 self.send_json({"ok": True})
@@ -912,6 +1039,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"ok": True, "result": result})
                 return
             self.send_error_json("接口不存在", HTTPStatus.NOT_FOUND)
+        except AigisRequired as exc:
+            self.send_json(
+                {
+                    "ok": False,
+                    "error": str(exc),
+                    "code": "aigis_required",
+                    "aigis": exc.aigis,
+                },
+                HTTPStatus.PRECONDITION_REQUIRED,
+            )
         except Exception as exc:
             self.send_error_json(str(exc), HTTPStatus.BAD_REQUEST)
 

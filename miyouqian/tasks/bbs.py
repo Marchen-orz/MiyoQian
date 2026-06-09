@@ -59,36 +59,37 @@ class BbsTasks:
         elif task_flags["sign"]:
             skipped.append("社区签到已完成")
             self._add(messages, "社区签到已完成，跳过")
-        self._add(messages, "正在获取帖子列表")
-        posts = self._posts()
-        if posts:
-            if self.bbs_config.get("read", True) and not task_flags["read"]:
-                result = self._read(posts[: task_flags["read_num"]])
-                messages.extend(result["messages"])
-                success.extend(result["success"])
-                failed.extend(result["failed"])
-            elif task_flags["read"]:
-                skipped.append("看帖已完成")
-                self._add(messages, "看帖任务已完成，跳过")
-            if self.bbs_config.get("like", True) and not task_flags["like"]:
-                result = self._like(posts[: task_flags["like_num"]])
-                messages.extend(result["messages"])
-                success.extend(result["success"])
-                failed.extend(result["failed"])
-            elif task_flags["like"]:
-                skipped.append("点赞已完成")
-                self._add(messages, "点赞任务已完成，跳过")
-            if self.bbs_config.get("share", True) and not task_flags["share"]:
-                result = self._share(posts[:1])
-                messages.extend(result["messages"])
-                success.extend(result["success"])
-                failed.extend(result["failed"])
-            elif task_flags["share"]:
-                skipped.append("分享已完成")
-                self._add(messages, "分享任务已完成，跳过")
+        interaction_plan = [
+            ("read", "read_num", "看帖", self._read),
+            ("like", "like_num", "点赞", self._like),
+            ("share", None, "分享", self._share),
+        ]
+        needs_posts = any(
+            self.bbs_config.get(flag, True) and not task_flags[flag]
+            for flag, _, _, _ in interaction_plan
+        )
+        if needs_posts:
+            self._add(messages, "正在获取帖子列表")
+            posts = self._posts()
+            if posts:
+                for flag, num_key, label, action in interaction_plan:
+                    if self.bbs_config.get(flag, True) and not task_flags[flag]:
+                        limit = task_flags[num_key] if num_key else 1
+                        result = action(posts[:limit])
+                        messages.extend(result["messages"])
+                        success.extend(result["success"])
+                        failed.extend(result["failed"])
+                    elif self.bbs_config.get(flag, True) and task_flags[flag]:
+                        skipped.append(f"{label}已完成")
+                        self._add(messages, f"{label}任务已完成，跳过")
+            else:
+                failed.append("获取帖子列表失败")
+                self._add(messages, "获取帖子列表失败，无法执行看帖/点赞/分享")
         else:
-            failed.append("获取帖子列表失败")
-            self._add(messages, "获取帖子列表失败，无法执行看帖/点赞/分享")
+            for flag, _, label, _ in interaction_plan:
+                if self.bbs_config.get(flag, True) and task_flags[flag]:
+                    skipped.append(f"{label}已完成")
+                    self._add(messages, f"{label}任务已完成，跳过")
         state = self._task_state() or state
         final_received = int(state.get("already_received_points") or received)
         final_can_get = max(possible_today - final_received, 0)
