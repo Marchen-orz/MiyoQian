@@ -33,6 +33,13 @@ def format_line(message: str, component: str = "app") -> str:
 
 
 def append_log(path: str | pathlib.Path, line: str, component: str | None = None) -> None:
+    try:
+        #查看当前启动方式，如果发现是通过index.py启动，则禁用日志改为输出到终端，因为在serverless环境下文件系统是只读的
+        if pathlib.Path(sys.modules['__main__'].__file__).name == "index.py":
+            print(line)
+            return
+    except (AttributeError, KeyError):
+        pass
     configure_logger(path)
     parsed_component, message = parse_log_line(line)
     logger.bind(component=clean_component(component or parsed_component)).info(message)
