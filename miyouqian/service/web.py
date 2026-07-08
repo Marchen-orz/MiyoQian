@@ -403,7 +403,7 @@ class WebApp:
                     save_config(self.config_path, self.config)
                     self.exchange_scheduler.reload(self.config)
             if shop_config.get("push", False):
-                self._send_exchange_push(goods_name, {"ok": False, "message": summary}, plan)
+                self._send_exchange_push(goods_name, {"ok": False, "message": summary, "attempt": 0}, plan)
             raise
         summary = f"{result.get('message', '未知结果')}({result.get('retcode')})，请求 {result.get('attempt', 1)} 次"
         with self.lock:
