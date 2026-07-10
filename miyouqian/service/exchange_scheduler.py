@@ -28,7 +28,7 @@ class ExchangeScheduler:
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._workers: dict[str, PlanWorker] = {}
-        self._running_plan: int | None = None
+        self._running_plans: set[int] = set()
         self._last_error = ""
 
     def start(self) -> None:
@@ -46,14 +46,14 @@ class ExchangeScheduler:
 
     def status(self) -> dict[str, Any]:
         with self._lock:
-            running_plan = self._running_plan
+            running_plans = sorted(self._running_plans)
             last_error = self._last_error
             worker_count = len(self._workers)
         next_plan = self._next_plan()
         return {
             "enabled": bool(self._shop_config().get("enable", False)),
-            "running": running_plan is not None,
-            "running_plan": running_plan,
+            "running_plans": running_plans,
+            "running_count": len(running_plans),
             "worker_count": worker_count,
             "next_run": format_ts(next_plan[1]) if next_plan else "",
             "next_plan": next_plan[0] if next_plan else None,
@@ -61,35 +61,55 @@ class ExchangeScheduler:
         }
 
     def _rebuild_workers(self) -> None:
-        self._stop_workers()
         if self._stop.is_set():
             return
         shop = self._shop_config()
-        if not shop.get("enable", False):
-            return
-        workers: dict[str, PlanWorker] = {}
-        now = time.time()
-        for index, plan in enumerate(shop.get("plans") or []):
-            if not isinstance(plan, dict):
-                continue
-            exchange_at = parse_ts(plan.get("exchange_at"))
-            if not plan.get("enable", True) or not plan.get("auto", True) or exchange_at <= 0:
-                continue
-            attempt_key = self._attempt_key(plan, exchange_at)
-            if str(plan.get("last_attempt_key") or "") == attempt_key:
-                continue
-            if exchange_at <= now:
-                continue
-            worker = PlanWorker(index, plan, exchange_at, attempt_key, self._run_worker_plan, self.log)
-            workers[attempt_key] = worker
+        desired: dict[str, tuple[int, dict, int]] = {}
+        if shop.get("enable", False):
+            now = time.time()
+            for index, plan in enumerate(shop.get("plans") or []):
+                if not isinstance(plan, dict):
+                    continue
+                exchange_at = parse_ts(plan.get("exchange_at"))
+                if not plan.get("enable", True) or not plan.get("auto", True) or exchange_at <= 0:
+                    continue
+                attempt_key = self._attempt_key(plan, exchange_at)
+                if str(plan.get("last_attempt_key") or "") == attempt_key:
+                    continue
+                if exchange_at <= now:
+                    continue
+                desired[attempt_key] = (index, plan, exchange_at)
+
         with self._lock:
-            self._workers = workers
-        for worker in workers.values():
+            current_keys = set(self._workers.keys())
+            desired_keys = set(desired.keys())
+            to_remove = current_keys - desired_keys
+            to_add = desired_keys - current_keys
+
+            removed_workers = [self._workers.pop(k) for k in to_remove]
+            new_workers: dict[str, PlanWorker] = {}
+            for key in to_add:
+                index, plan, exchange_at = desired[key]
+                worker = PlanWorker(index, plan, exchange_at, key, self._run_worker_plan, self.log)
+                self._workers[key] = worker
+                new_workers[key] = worker
+
+
+        current_thread = threading.current_thread()
+        for worker in removed_workers:
+            worker.stop()
+        for worker in removed_workers:
+            if worker.is_current_thread(current_thread):
+                continue
+            worker.join(timeout=1)
+
+        for worker in new_workers.values():
             worker.start()
-        if workers:
-            self.log(f"已启动 {len(workers)} 个商品兑换计划线程")
+        if new_workers:
+            self.log(f"已启动 {len(new_workers)} 个商品兑换计划线程")
 
     def _stop_workers(self) -> None:
+        """方法现仅用于整体 stop()"""
         with self._lock:
             workers = list(self._workers.values())
             self._workers = {}
@@ -103,7 +123,7 @@ class ExchangeScheduler:
 
     def _run_worker_plan(self, index: int) -> None:
         with self._lock:
-            self._running_plan = index
+            self._running_plans.add(index)
         try:
             self.run_plan_fn(index)
             with self._lock:
@@ -114,7 +134,7 @@ class ExchangeScheduler:
             self.log(f"商品兑换计划 {index + 1} 执行失败: {exc}")
         finally:
             with self._lock:
-                self._running_plan = None
+                self._running_plans.discard(index)
 
     def _next_plan(self) -> tuple[int, int] | None:
         shop = self._shop_config()

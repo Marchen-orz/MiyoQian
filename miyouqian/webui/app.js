@@ -1845,8 +1845,12 @@ async function refreshStatus() {
       : "已关闭";
   $("nextRun").textContent = formatTime(scheduler.next_run);
   $("lastResult").textContent = latestResultText(scheduler, login, logs);
+
+  const runningPlans = new Set(exchangeScheduler.running_plans || []);
+  const runningCount = exchangeScheduler.running_count ?? runningPlans.size;
+
   if ($("shopScheduleMetric")) {
-    $("shopScheduleMetric").textContent = exchangeScheduler.running
+    $("shopScheduleMetric").textContent = runningCount > 0
       ? "兑换中"
       : exchangeScheduler.enabled
         ? "已启用"
