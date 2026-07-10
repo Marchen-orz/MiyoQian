@@ -401,7 +401,7 @@ class WebApp:
                     plans[plan_index]["last_result"] = summary
                     plans[plan_index]["last_run"] = datetime.now().isoformat(timespec="seconds")
                     save_config(self.config_path, self.config)
-                    self.exchange_scheduler.reload(self.config)
+            self.exchange_scheduler.reload(self.config) # 移出锁外,防止嵌套等待
             if shop_config.get("push", False):
                 self._send_exchange_push(goods_name, {"ok": False, "message": summary, "attempt": 0}, plan)
             raise
@@ -414,7 +414,7 @@ class WebApp:
                 if result.get("ok"):
                     plans[plan_index]["enable"] = False
                 save_config(self.config_path, self.config)
-                self.exchange_scheduler.reload(self.config)
+        self.exchange_scheduler.reload(self.config) #同上
         self.log(f"商品兑换计划完成: {goods_name}，{summary}", "exchange")
 
         # 发送兑换结果推送
