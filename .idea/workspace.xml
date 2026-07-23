@@ -5,12 +5,12 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="dcdf5bf0-9752-41d1-ae87-e63bbb22d2e8" name="更改" comment="">
-      <change afterPath="$PROJECT_DIR$/miyouqian/core/onebot.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/miyouqian/core/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/miyouqian/core/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/miyouqian/core/onebot.py" beforeDir="false" afterPath="$PROJECT_DIR$/miyouqian/core/onebot.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/miyouqian/service/notifier.py" beforeDir="false" afterPath="$PROJECT_DIR$/miyouqian/service/notifier.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/miyouqian/webui/app.css" beforeDir="false" afterPath="$PROJECT_DIR$/miyouqian/webui/app.css" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/miyouqian/webui/app.js" beforeDir="false" afterPath="$PROJECT_DIR$/miyouqian/webui/app.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/miyouqian/webui/index.html" beforeDir="false" afterPath="$PROJECT_DIR$/miyouqian/webui/index.html" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -46,60 +46,60 @@
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
       <entry key="MS100" value="1.0" />
-      <entry key="MS500" value="1.0" />
-      <entry key="S2" value="1.0000000000000415" />
-      <entry key="S5" value="1.0000067210363999" />
-      <entry key="S10" value="1.0037286453113254" />
-      <entry key="S30" value="1.327463711829366" />
-      <entry key="S60" value="2.212598232334453" />
-      <entry key="M2" value="3.7718249750493893" />
-      <entry key="M5" value="8.162637563370525" />
-      <entry key="M10" value="13.957815869573505" />
-      <entry key="M15" value="19.142187728086896" />
-      <entry key="M30" value="38.02527089898958" />
-      <entry key="H1" value="80.59316187477096" />
-      <entry key="H2" value="142.6943531449876" />
-      <entry key="H4" value="202.0379618746147" />
-      <entry key="D1" value="279.2243577320062" />
-      <entry key="W1" value="296.0689940049981" />
+      <entry key="MS500" value="1.000014355867119" />
+      <entry key="S2" value="1.061554152680972" />
+      <entry key="S5" value="1.3278709529688533" />
+      <entry key="S10" value="1.5726001685022921" />
+      <entry key="S30" value="1.8303932759100658" />
+      <entry key="S60" value="1.9112593482726221" />
+      <entry key="M2" value="1.955209282009461" />
+      <entry key="M5" value="2.2293436235715927" />
+      <entry key="M10" value="4.976268426183601" />
+      <entry key="M15" value="9.849012558553786" />
+      <entry key="M30" value="28.292547986691993" />
+      <entry key="H1" value="69.50062448042766" />
+      <entry key="H2" value="137.64623947168855" />
+      <entry key="H4" value="211.09390755683378" />
+      <entry key="D1" value="316.46314376714906" />
+      <entry key="W1" value="340.7338847230535" />
     </decayedCancelled>
     <decayedSelected>
       <entry key="MS100" value="0.0" />
       <entry key="MS500" value="0.0" />
-      <entry key="S2" value="3.0016923734679843E-170" />
-      <entry key="S5" value="1.5521956883075082E-68" />
-      <entry key="S10" value="1.2458714573773284E-34" />
-      <entry key="S30" value="4.994489204962135E-12" />
-      <entry key="S60" value="2.23483538654688E-6" />
-      <entry key="M2" value="0.0014949366157510566" />
-      <entry key="M5" value="0.07426273649028352" />
-      <entry key="M10" value="0.3086993629814885" />
-      <entry key="M15" value="0.6719061042251523" />
-      <entry key="M30" value="2.902216010669544" />
-      <entry key="H1" value="9.339313075098932" />
-      <entry key="H2" value="19.14394934724417" />
-      <entry key="H4" value="28.367190121458144" />
-      <entry key="D1" value="40.05725610734089" />
-      <entry key="W1" value="42.565111047254234" />
+      <entry key="S2" value="6.994541207133616E-268" />
+      <entry key="S5" value="1.37373730877533E-107" />
+      <entry key="S10" value="3.706396241214907E-54" />
+      <entry key="S30" value="1.5486434776388992E-18" />
+      <entry key="S60" value="1.2770806172879907E-9" />
+      <entry key="M2" value="4.169866670948085E-5" />
+      <entry key="M5" value="0.03318705742655926" />
+      <entry key="M10" value="0.4813269975122621" />
+      <entry key="M15" value="1.3280502048345888" />
+      <entry key="M30" value="4.401243169305781" />
+      <entry key="H1" value="11.018746628221944" />
+      <entry key="H2" value="21.912751376357345" />
+      <entry key="H4" value="33.4666276250738" />
+      <entry key="D1" value="49.67624864141744" />
+      <entry key="W1" value="53.355270492795256" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="0.06983044612951374" />
-      <entry key="MS500" value="0.5872309856068267" />
-      <entry key="S2" value="0.8753913296943052" />
-      <entry key="S5" value="0.9481651006529376" />
-      <entry key="S10" value="0.9774575472074186" />
-      <entry key="S30" value="1.318448004810169" />
-      <entry key="S60" value="2.2077974748794076" />
-      <entry key="M2" value="3.770499319955374" />
-      <entry key="M5" value="8.234222288067949" />
-      <entry key="M10" value="14.263358580829093" />
-      <entry key="M15" value="19.81013599221545" />
-      <entry key="M30" value="40.92040912801481" />
-      <entry key="H1" value="89.9224717924838" />
-      <entry key="H2" value="161.8285877670497" />
-      <entry key="H4" value="230.39808622228333" />
-      <entry key="D1" value="319.27996706972056" />
-      <entry key="W1" value="338.63385535126923" />
+      <entry key="MS100" value="0.9460576467255959" />
+      <entry key="MS500" value="0.9889848217349452" />
+      <entry key="S2" value="1.0582966944150922" />
+      <entry key="S5" value="1.3257187880913677" />
+      <entry key="S10" value="1.5711336705046504" />
+      <entry key="S30" value="1.8297672893264727" />
+      <entry key="S60" value="1.9109248366554175" />
+      <entry key="M2" value="1.955074155173483" />
+      <entry key="M5" value="2.262010585099479" />
+      <entry key="M10" value="5.455088784732939" />
+      <entry key="M15" value="11.172823455671564" />
+      <entry key="M30" value="32.68681113629872" />
+      <entry key="H1" value="80.51004809852884" />
+      <entry key="H2" value="159.5493266148067" />
+      <entry key="H4" value="244.5530064701068" />
+      <entry key="D1" value="366.13749934139236" />
+      <entry key="W1" value="394.08886393799236" />
     </decayedShown>
   </component>
   <component name="ProjectColorInfo">{
@@ -111,31 +111,31 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;ASKED_SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;Python.main.executor&quot;: &quot;Run&quot;,
-    &quot;Python.scratch.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.MCP Project settings loaded&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
-    &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
-    &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
-    &quot;kotlin.migration.detection.enabled&quot;: &quot;false&quot;,
-    &quot;last_opened_file_path&quot;: &quot;F:/Python项目/MiyoQian&quot;,
-    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
-    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;project.structure.last.edited&quot;: &quot;模块&quot;,
-    &quot;project.structure.proportion&quot;: &quot;0.15&quot;,
-    &quot;project.structure.side.proportion&quot;: &quot;0.2&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ASKED_SHARE_PROJECT_CONFIGURATION_FILES": "true",
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Python.main.executor": "Run",
+    "Python.scratch.executor": "Run",
+    "RunOnceActivity.MCP Project settings loaded": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "codeWithMe.voiceChat.enabledByDefault": "false",
+    "git-widget-placeholder": "master 上的 #4",
+    "kotlin-language-version-configured": "true",
+    "kotlin.migration.detection.enabled": "false",
+    "last_opened_file_path": "F:/Python项目/MiyoQian",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "project.structure.last.edited": "模块",
+    "project.structure.proportion": "0.15",
+    "project.structure.side.proportion": "0.2"
   }
-}</component>
+}]]></component>
   <component name="RunManager" selected="Python.main">
     <configuration default="true" type="JetRunConfigurationType">
       <module name="MiyoQian" />
