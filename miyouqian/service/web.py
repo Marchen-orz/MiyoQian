@@ -15,7 +15,7 @@ import threading
 from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, unquote, urlparse
 
 import qrcode
@@ -311,7 +311,7 @@ class WebApp:
             )
             return result
 
-    def shop_exchange_once(self, plan: dict[str, Any]) -> dict[str, Any]:
+    def shop_exchange_once(self, plan: dict[str, Any], on_progress: Callable[[int, str], None] | None = None) -> dict[str, Any]:
         account = self._account_by_index(int(plan.get("account_index") or 0))
         account_name = display_account_name(account)
         goods_name = str(plan.get("goods_name") or plan.get("goods_id") or "未知商品")
@@ -327,7 +327,7 @@ class WebApp:
                     config,
                     account,
                     emit=lambda message: self.log(message, "exchange"),
-                ).exchange_with_retry(plan)
+                ).exchange_with_retry(plan, on_progress=on_progress)
         except Exception as exc:
             self.log(f"商品兑换请求异常: {goods_name}，账号 {account_name}，{exc}", "exchange")
             raise
@@ -344,8 +344,14 @@ class WebApp:
             plan = copy.deepcopy(plans[plan_index])
             goods_name = plan.get("goods_name") or plan.get("goods_id")
         self.log(f"开始手动执行商品兑换计划 {plan_index + 1}: {goods_name}", "exchange")
+        self.exchange_scheduler.update_progress(plan_index, attempt=0, message="准备兑换")
         try:
-            result = self.shop_exchange_once(plan)
+            result = self.shop_exchange_once(
+                plan,
+                on_progress=lambda attempt, msg: self.exchange_scheduler.update_progress(
+                    plan_index, attempt=attempt, message=msg
+                ),
+            )
         except Exception as exc:
             summary = f"异常: {exc}"
             with self.lock:
@@ -359,6 +365,8 @@ class WebApp:
             if shop_config.get("push", False):
                 self._send_exchange_push(goods_name, {"ok": False, "message": summary}, plan)
             raise
+        finally:
+            self.exchange_scheduler.clear_progress(plan_index)
         summary = f"{result.get('message', '未知结果')}({result.get('retcode')})，请求 {result.get('attempt', 1)} 次"
         with self.lock:
             plans = self.config.get("shop_exchange", {}).get("plans") or []
@@ -392,7 +400,12 @@ class WebApp:
             save_config(self.config_path, self.config)
         self.log(f"开始执行商品兑换计划: {goods_name}", "exchange")
         try:
-            result = self.shop_exchange_once(plan)
+            result = self.shop_exchange_once(
+                plan,
+                on_progress=lambda attempt, msg: self.exchange_scheduler.update_progress(
+                    plan_index, attempt=attempt, message=msg
+                ),
+            )
         except Exception as exc:
             summary = f"异常: {exc}"
             with self.lock:

@@ -1215,6 +1215,18 @@ textarea:focus {
   background: #f7fafc;
 }
 
+.plan-badge.running {
+  color: #fff;
+  background: var(--primary-strong);
+  border-color: var(--primary-strong);
+  animation: plan-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes plan-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
 .shop-plan-body {
   display: grid;
   gap: 12px;

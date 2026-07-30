@@ -50,6 +50,7 @@ let shopGoods = [];
 let shopGames = [{ key: "", name: "全部分区" }];
 let shopSelectedGame = "";
 let shopOpenPlans = new Set();
+let shopRunningProgress = {};
 let shopRequestInFlight = false;
 let shopGoodsLoading = false;
 let shopGoodsLoadSeq = 0;
@@ -1224,6 +1225,7 @@ function renderShopPlans() {
 function shopPlanRow(plan, index) {
   const accounts = config.accounts || [];
   const paused = plan.enable === false;
+  const running = Boolean(shopRunningProgress[String(index)]);
   const open = shopOpenPlans.has(String(index)) ? "open" : "";
   const roleDisplay = shopRoleDisplay(plan);
   const serverDisplay = shopServerDisplay(plan);
@@ -1241,10 +1243,10 @@ function shopPlanRow(plan, index) {
       <summary class="shop-plan-summary">
         <span class="shop-plan-title">
           <strong>${escapeHtml(plan.goods_name || plan.goods_id)}</strong>
-          <small>${escapeHtml(shopPlanStatus(plan))}</small>
+          <small>${escapeHtml(shopPlanStatus(plan, index))}</small>
         </span>
         <span class="shop-plan-badges">
-          <span class="plan-badge ${paused ? "paused" : "active"}">${paused ? "已暂停" : "自动"}</span>
+          <span class="plan-badge ${running ? "running" : paused ? "paused" : "active"}">${running ? "兑换中" : paused ? "已暂停" : "自动"}</span>
           <span class="disclosure" aria-hidden="true"></span>
         </span>
       </summary>
@@ -1311,7 +1313,7 @@ function shopPlanRow(plan, index) {
       <input data-shop-plan-field="last_attempt_key" type="hidden" value="${escapeAttr(plan.last_attempt_key || "")}" />
       <input data-shop-plan-field="last_run" type="hidden" value="${escapeAttr(plan.last_run || "")}" />
       <div class="shop-plan-foot">
-        <span>${escapeHtml(shopPlanStatus(plan))}</span>
+        <span>${escapeHtml(shopPlanStatus(plan, index))}</span>
         <button class="ghost" type="button" data-shop-plan-now="${index}" title="立即执行该兑换计划">
           <svg><use href="#i-play"></use></svg>
           <span>立即兑换</span>
@@ -1895,7 +1897,15 @@ async function withButtonLoading(button, loadingText, task) {
   }
 }
 
-function shopPlanStatus(plan) {
+function shopPlanStatus(plan, index) {
+  const progress = shopRunningProgress[String(index)];
+  if (progress) {
+    const attempt = Number(progress.attempt || 0);
+    const message = progress.message || "兑换中";
+    return attempt > 0
+      ? `兑换中 · 第 ${attempt} 次尝试 · ${message}`
+      : `兑换中 · ${message}`;
+  }
   if (plan.last_result) {
     return `${plan.enable === false ? "已暂停，" : ""}最近结果：${plan.last_result}`;
   }
@@ -2035,6 +2045,7 @@ async function refreshStatus() {
 
   const runningPlans = new Set(exchangeScheduler.running_plans || []);
   const runningCount = exchangeScheduler.running_count ?? runningPlans.size;
+  shopRunningProgress = exchangeScheduler.running_progress || {};
 
   if ($("shopScheduleMetric")) {
     $("shopScheduleMetric").textContent = runningCount > 0

@@ -29,6 +29,7 @@ class ExchangeScheduler:
         self._lock = threading.Lock()
         self._workers: dict[str, PlanWorker] = {}
         self._running_plans: set[int] = set()
+        self._progress: dict[int, dict[str, Any]] = {}
         self._last_error = ""
 
     def start(self) -> None:
@@ -47,6 +48,7 @@ class ExchangeScheduler:
     def status(self) -> dict[str, Any]:
         with self._lock:
             running_plans = sorted(self._running_plans)
+            running_progress = {str(i): dict(v) for i, v in self._progress.items()}
             last_error = self._last_error
             worker_count = len(self._workers)
         next_plan = self._next_plan()
@@ -54,10 +56,39 @@ class ExchangeScheduler:
             "enabled": bool(self._shop_config().get("enable", False)),
             "running_plans": running_plans,
             "running_count": len(running_plans),
+            "running_progress": running_progress,
             "worker_count": worker_count,
             "next_run": format_ts(next_plan[1]) if next_plan else "",
             "next_plan": next_plan[0] if next_plan else None,
             "last_error": last_error,
+        }
+
+    def update_progress(self, index: int, *, attempt: int | None = None, message: str | None) -> None:
+        """更新某条兑换计划的实时进度（并发安全，供 Web 层在重试过程中回调）。"""
+        with self._lock:
+            entry = self._progress.setdefault(index, self._initial_progress(index))
+            if attempt is not None:
+                entry["attempt"] = attempt
+            if message is not None:
+                entry["message"] = message
+
+    def clear_progress(self, index: int) -> None:
+        """清除某条计划的实时进度，使前端回落到最终结果展示。"""
+        with self._lock:
+            self._progress.pop(index, None)
+
+    def _initial_progress(self, index: int) -> dict[str, Any]:
+        goods_name = f"计划 {index + 1}"
+        plans = self._shop_config().get("plans") or []
+        if 0 <= index < len(plans):
+            plan = plans[index]
+            if isinstance(plan, dict):
+                goods_name = str(plan.get("goods_name") or plan.get("goods_id") or goods_name)
+        return {
+            "goods_name": goods_name,
+            "attempt": 0,
+            "message": "准备兑换",
+            "started_at": datetime.now().isoformat(timespec="seconds"),
         }
 
     def _rebuild_workers(self) -> None:
@@ -124,6 +155,7 @@ class ExchangeScheduler:
     def _run_worker_plan(self, index: int) -> None:
         with self._lock:
             self._running_plans.add(index)
+            self._progress.setdefault(index, self._initial_progress(index))
         try:
             self.run_plan_fn(index)
             with self._lock:
@@ -135,6 +167,7 @@ class ExchangeScheduler:
         finally:
             with self._lock:
                 self._running_plans.discard(index)
+                self._progress.pop(index, None)
 
     def _next_plan(self) -> tuple[int, int] | None:
         shop = self._shop_config()

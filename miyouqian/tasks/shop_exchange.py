@@ -209,7 +209,7 @@ class ShopExchange:
         self._add(f"商品 {goods_id} 兑换请求返回: {result['message']}({retcode})")
         return result
 
-    def exchange_with_retry(self, plan: dict[str, Any]) -> dict[str, Any]:
+    def exchange_with_retry(self, plan: dict[str, Any], on_progress: Callable[[int, str], None] | None = None) -> dict[str, Any]:
         from ..core.http import ApiError
 
         shop = self.config.get("shop_exchange", {})
@@ -221,12 +221,16 @@ class ShopExchange:
         while True:
             attempt += 1
             self._add(f"正在发送第 {attempt} 次商品兑换请求")
+            if on_progress:
+                on_progress(attempt, "正在发送兑换请求")
             try:
                 last = self.exchange(plan)
             except ApiError as exc:
                 self._add(f"商品 {plan.get('goods_id', '')} 请求异常: {exc}")
                 last = {"ok": False, "retcode": None, "message": f"网络请求异常: {exc}", "data": {}}
             last["attempt"] = attempt
+            if on_progress:
+                on_progress(attempt, f"{last.get('message', '')}({last.get('retcode')})")
             remaining = deadline - time.time()
             if last.get("ok") or remaining <= 0:
                 return last
