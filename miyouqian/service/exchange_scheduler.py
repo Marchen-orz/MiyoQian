@@ -119,6 +119,9 @@ class ExchangeScheduler:
 
             removed_workers = [self._workers.pop(k) for k in to_remove]
             new_workers: dict[str, PlanWorker] = {}
+            for key in current_keys & desired_keys:
+                index, plan, _ = desired[key]
+                self._workers[key].update(index, plan)
             for key in to_add:
                 index, plan, exchange_at = desired[key]
                 worker = PlanWorker(index, plan, exchange_at, key, self._run_worker_plan, self.log)
@@ -220,6 +223,11 @@ class PlanWorker:
 
     def start(self) -> None:
         self._thread.start()
+
+    def update(self, index: int, plan: dict[str, Any]) -> None:
+        """同步配置重排后的计划索引与最新快照。"""
+        self.index = index
+        self.plan = plan
 
     def stop(self) -> None:
         self._stop.set()
