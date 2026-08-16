@@ -109,7 +109,8 @@ class ExchangeScheduler:
                     continue
                 if exchange_at <= now:
                     continue
-                desired[attempt_key] = (index, plan, exchange_at)
+                worker_key = self._worker_key(plan, exchange_at)
+                desired[worker_key] = (index, plan, exchange_at)
 
         with self._lock:
             current_keys = set(self._workers.keys())
@@ -193,6 +194,11 @@ class ExchangeScheduler:
 
     def _attempt_key(self, plan: dict[str, Any], exchange_at: int) -> str:
         return f"{plan.get('goods_id', '')}:{exchange_at}"
+
+    def _worker_key(self, plan: dict[str, Any], exchange_at: int) -> str:
+        """生成计划线程唯一键，避免同商品同时间的多账号计划互相覆盖。"""
+        account_index = plan.get("account_index", 0)
+        return f"{account_index}:{self._attempt_key(plan, exchange_at)}"
 
 
 class PlanWorker:

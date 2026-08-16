@@ -9,3 +9,4 @@ qrcode.png
 data/
 logs/
 tests/*
+!tests/test_exchange_scheduler.py
