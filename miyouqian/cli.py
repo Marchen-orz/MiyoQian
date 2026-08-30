@@ -20,7 +20,7 @@ from .core.config import (
 )
 from .core.http import ApiClient
 from .core.logs import append_log, configure_logger, format_line
-from .service.notifier import is_task_success, send_push
+from .service.notifier import send_task_push
 from .service.runner import run_tasks
 
 
@@ -134,7 +134,7 @@ def command_run(
         ),
     )
     append_log(log_file, format_line("签到任务执行完成", "cli"), component="cli")
-    push_result = send_push(config, "米游签任务完成", "\n".join(task_lines), success=is_task_success(task_lines))
+    push_result = send_task_push(config, task_lines)
     if push_result:
         append_log(log_file, format_line(push_result, "push"), component="push")
     return 0

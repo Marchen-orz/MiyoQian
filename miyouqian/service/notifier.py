@@ -16,10 +16,19 @@ from email.message import EmailMessage
 from typing import Any, Callable, Optional
 from urllib.parse import quote_plus
 from ..core.onebot import OneBotHTTP
+from ..core.captcha import DAMAGOU_BALANCE_INSUFFICIENT_MESSAGE
 
 import httpx
 
 PUSH_TEMPLATE_DIR = pathlib.Path(__file__).resolve().parents[1] / "templates" / "push"
+
+
+def send_task_push(config: dict[str, Any], lines: list[str]) -> str:
+    """发送签到结果推送，并对打码狗余额不足使用醒目的专用标题。"""
+    balance_insufficient = has_damagou_balance_insufficient(lines)
+    title = "打码狗余额不足" if balance_insufficient else "米游签任务完成"
+    success = False if balance_insufficient else is_task_success(lines)
+    return send_push(config, title, "\n".join(lines), success=success)
 
 
 def send_push(config: dict[str, Any], title: str, message: str, success: bool = True) -> str:
@@ -837,7 +846,14 @@ def parse_counts(line: str) -> tuple[int, int, int]:
     )
 
 
+def has_damagou_balance_insufficient(lines: list[str]) -> bool:
+    """判断任务日志中是否出现打码狗余额不足。"""
+    return any(DAMAGOU_BALANCE_INSUFFICIENT_MESSAGE in line for line in lines)
+
+
 def is_task_success(lines: list[str]) -> bool:
+    if has_damagou_balance_insufficient(lines):
+        return False
     for line in lines:
         if line.startswith(("游戏社区失败项：", "游戏失败项：", "云游戏失败项：", "米游币失败项：")):
             return False
@@ -1036,6 +1052,7 @@ def is_summary_line(line: str) -> bool:
         "社区任务结束：",
         "米游币今日进度：",
         "今日任务已完成",
+        DAMAGOU_BALANCE_INSUFFICIENT_MESSAGE,
         "配置 enable=false",
         "没有配置账号",
     )

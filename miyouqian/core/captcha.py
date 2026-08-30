@@ -12,6 +12,7 @@ DAMAGOU_URL = "http://api.damagou.top/apiv1/jiyanRecognize.html"
 PROVIDER_LABELS = {
     "damagou": "打码狗",
 }
+DAMAGOU_BALANCE_INSUFFICIENT_MESSAGE = "打码狗余额不足，请充值后重试"
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,10 @@ def _solve(
         if geetest_success == 0:
             params["success"] = 0
         data = client.get_json(DAMAGOU_URL, params=params, timeout=float(channel.get("timeout") or 60))
+        if is_damagou_balance_insufficient(data):
+            if emit:
+                emit(DAMAGOU_BALANCE_INSUFFICIENT_MESSAGE)
+            return None
         solution = _parse_damagou_response(data)
         if not solution and emit:
             emit(f"{active_provider_label(config)}验证码识别失败: {data.get('msg') or '未知错误'}")
@@ -118,3 +123,8 @@ def _parse_damagou_response(data: dict[str, Any]) -> CaptchaSolution | None:
     if not challenge or not validate:
         return None
     return CaptchaSolution(validate=validate, challenge=challenge)
+
+
+def is_damagou_balance_insufficient(data: dict[str, Any]) -> bool:
+    """判断打码狗错误信息中是否包含“余额”。"""
+    return str(data.get("status")) != "0" and "余额" in str(data)

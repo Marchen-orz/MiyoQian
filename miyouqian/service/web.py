@@ -27,7 +27,7 @@ from ..core.http import ApiClient
 from ..core.logs import append_log, configure_logger, format_line, print_startup_banner
 from ..tasks.shop_exchange import ShopExchange
 from .exchange_scheduler import ExchangeScheduler
-from .notifier import is_task_success, send_push, send_exchange_push, push_channels
+from .notifier import send_push, send_task_push, send_exchange_push, push_channels
 from .runner import run_tasks
 from .scheduler import DailyScheduler
 
@@ -171,7 +171,7 @@ class WebApp:
                 self.log(push_result, "push")
             raise
         self.log("任务编排完成，准备发送推送", "task")
-        push_result = send_push(config, "米游签任务完成", "\n".join(lines), success=is_task_success(lines))
+        push_result = send_task_push(config, lines)
         if push_result:
             self.log(push_result, "push")
         return []
