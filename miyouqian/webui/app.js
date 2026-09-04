@@ -3043,9 +3043,9 @@ function showAuthPage(passwordSet) {
   const shell = document.querySelector(".shell");
   shell.style.display = "none";
 
-  const subtitle = passwordSet ? "请输入访问密码" : "首次使用，请设置访问密码";
+  const subtitle = passwordSet ? "请输入访问密码" : "首次使用，请设置外网访问密码";
   const buttonText = passwordSet ? "登录" : "设置密码";
-  const inputPlaceholder = passwordSet ? "输入密码" : "设置密码（至少 4 位）";
+  const inputPlaceholder = passwordSet ? "输入密码" : "设置密码（至少 8 位）";
 
   const overlay = document.createElement("div");
   overlay.className = "auth-overlay";
@@ -3074,8 +3074,8 @@ function showAuthPage(passwordSet) {
       errorEl.textContent = "请输入密码";
       return;
     }
-    if (!passwordSet && password.length < 4) {
-      errorEl.textContent = "密码至少 4 位";
+    if (!passwordSet && password.length < 8) {
+      errorEl.textContent = "密码至少 8 位";
       return;
     }
     submitBtn.disabled = true;
