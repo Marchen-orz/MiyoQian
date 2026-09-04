@@ -911,6 +911,7 @@ push:
 
 - Bot Token
 - Chat ID
+- 自定义 API URL ，可留空
 
 示例：
 
@@ -921,6 +922,7 @@ push:
       enable: true
       token: "bot token"
       chat_id: "chat id"
+      api_url: ""
 ```
 
 ### 钉钉机器人

@@ -312,6 +312,7 @@ function pushChannelFields(provider, channel) {
     webhook: channel.webhook || "",
     topic: channel.topic || "",
     chat_id: channel.chat_id || "",
+    api_url: channel.api_url || "",
     secret: channel.secret || "",
     push_url: channel.push_url || "",
     access_token: channel.access_token || "",
@@ -366,6 +367,7 @@ function pushChannelFields(provider, channel) {
     telegram: [
       field("token", "Bot Token", "password"),
       field("chat_id", "Chat ID"),
+      field("api_url", "自定义 API URL (可选)"),
     ],
     dingrobot: [
       field("webhook", "Webhook", "password"),
@@ -431,6 +433,7 @@ function hasPushChannelConfig(channel) {
     "webhook",
     "topic",
     "chat_id",
+    "api_url",
     "secret",
     "push_url",
     "access_token",
@@ -449,7 +452,7 @@ function pushChannelFieldNames(provider) {
   const fields = {
     pushplus: ["token", "topic"],
     qq: ["push_url", "access_token", "send_id", "msg_type"],
-    telegram: ["token", "chat_id"],
+    telegram: ["token", "chat_id", "api_url"],
     dingrobot: ["webhook", "secret"],
     feishubot: ["webhook"],
     email: [
