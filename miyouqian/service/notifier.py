@@ -116,6 +116,8 @@ def _send_exchange(
     topic = str(push.get("topic") or "").strip()
     chat_id = str(push.get("chat_id") or "").strip()
     secret = str(push.get("secret") or "").strip()
+    # 自定义 API 地址
+    api_url = str(push.get("api_url") or "").strip()
     # QQ推送
     push_url = str(push.get("push_url") or "").strip()
     access_token = str(push.get("access_token") or "").strip()
@@ -148,7 +150,8 @@ def _send_exchange(
     if provider == "telegram":
         require(token, "token")
         require(chat_id, "chat_id")
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        request_url = api_url or "https://api.telegram.org"
+        url = f"{request_url}/bot{token}/sendMessage"
         request_json(
             client,
             "POST",
@@ -235,6 +238,8 @@ def _send(client: httpx.Client, provider: str, push: dict[str, Any], title: str,
     topic = str(push.get("topic") or "").strip()
     chat_id = str(push.get("chat_id") or "").strip()
     secret = str(push.get("secret") or "").strip()
+    # 自定义 API 地址
+    api_url = str(push.get("api_url") or "").strip()
     # QQ推送
     push_url = str(push.get("push_url") or "").strip()
     access_token = str(push.get("access_token") or "").strip()
@@ -305,7 +310,8 @@ def _send(client: httpx.Client, provider: str, push: dict[str, Any], title: str,
     if provider == "telegram":
         require(token, "token")
         require(chat_id, "chat_id")
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        request_url = api_url or "https://api.telegram.org"
+        url = f"{request_url}/bot{token}/sendMessage"
         request_json(
             client,
             "POST",

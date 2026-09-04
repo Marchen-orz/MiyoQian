@@ -268,7 +268,7 @@ def normalize_cloud_game_enabled(value: Any) -> list[str]:
 PUSH_CHANNEL_FIELDS: dict[str, tuple[str, ...]] = {
     "pushplus": ("token", "topic"),
     "qq": ("push_url", "access_token", "send_id", "msg_type"),
-    "telegram": ("token", "chat_id"),
+    "telegram": ("token", "chat_id", "api_url"),
     "dingrobot": ("webhook", "secret"),
     "feishubot": ("webhook",),
     "email": ("smtp_host", "smtp_port", "smtp_user", "smtp_password", "mail_from", "mail_to", "smtp_ssl"),
