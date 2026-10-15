@@ -4,25 +4,17 @@ WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    UV_PROJECT_ENVIRONMENT=/opt/venv \
-    UV_LINK_MODE=copy \
     PATH="/opt/venv/bin:${PATH}"
 
-# 安装固定版本 uv，避免 latest 变化导致构建结果不可预测
-COPY --from=ghcr.io/astral-sh/uv:0.7.3 /uv /usr/local/bin/uv
+RUN python -m venv /opt/venv
 
-# 先复制依赖文件，利用 Docker 缓存层
-COPY pyproject.toml uv.lock ./
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
 
-# 安装依赖（不包含开发依赖）
-RUN uv sync --frozen --no-dev --no-install-project
-
-# 复制项目源码
 COPY miyouqian/ ./miyouqian/
 COPY main.py .
 COPY config.example.yaml .
 COPY docker/entrypoint.sh /entrypoint.sh
-# 对entrypoint.sh做兼容性修复，防止windows环境下因CRLF问题报错。
 RUN sed -i 's/\r$//' /entrypoint.sh
 
 RUN groupadd --system myq \

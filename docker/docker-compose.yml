@@ -1,5 +1,6 @@
 services:
   miyouqian:
+    image: joil258/miyouqian:latest
     build:
       context: ..
       dockerfile: docker/Dockerfile
