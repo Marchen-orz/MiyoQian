@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import threading
 import unittest
 from unittest.mock import Mock, patch
 
@@ -338,3 +339,137 @@ class PushChannelConfigTest(unittest.TestCase):
     def test_disabled_empty_channel_is_dropped(self):
         channels = normalize_push_channels({"channels": [{"provider": "serverchan", "enable": False}]})
         self.assertEqual(channels, [])
+
+
+class WebPushTestEndpointTest(unittest.TestCase):
+    """弹窗里的「测试推送」：只测提交的那条通道，不要求先保存或启用。"""
+
+    def _app(self, push):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(lock=threading.Lock(), config={"push": push}, log=Mock())
+
+    @patch("miyouqian.service.web.send_push", return_value="推送结果: wecombot: 成功")
+    def test_submitted_channel_is_tested_even_when_nothing_is_enabled(self, send_push):
+        from miyouqian.service.web import WebApp
+
+        app = self._app({"enable": False, "channels": []})
+        result = WebApp.test_push_channels(
+            app,
+            {"provider": "wecombot", "enable": False, "webhook": "https://example.invalid/bot"},
+        )
+        scoped = send_push.call_args.args[0]
+        self.assertIs(scoped["push"]["enable"], True)
+        self.assertIs(scoped["push"]["error_only"], False)
+        channels = scoped["push"]["channels"]
+        self.assertEqual([channel["provider"] for channel in channels], ["wecombot"])
+        self.assertEqual(channels[0]["webhook"], "https://example.invalid/bot")
+        self.assertTrue(channels[0]["enable"])
+        self.assertIn("成功", result)
+
+    @patch("miyouqian.service.web.send_push")
+    def test_empty_channel_payload_is_rejected(self, send_push):
+        from miyouqian.service.web import WebApp
+
+        app = self._app({"enable": True, "channels": []})
+        with self.assertRaises(ValueError):
+            WebApp.test_push_channels(app, {"provider": "wecombot"})
+        send_push.assert_not_called()
+
+    @patch("miyouqian.service.web.send_push", return_value="推送结果: qq: 成功")
+    def test_only_the_submitted_channel_is_tested(self, send_push):
+        from miyouqian.service.web import WebApp
+
+        app = self._app(
+            {
+                "enable": True,
+                "channels": [
+                    {"provider": "dingrobot", "enable": True, "webhook": "https://example.invalid/ding"},
+                    {
+                        "provider": "qq",
+                        "enable": True,
+                        "push_url": "http://127.0.0.1:3000",
+                        "access_token": "token",
+                        "send_id": "1134741727",
+                    },
+                ],
+            }
+        )
+        WebApp.test_push_channels(
+            app,
+            {
+                "provider": "qq",
+                "enable": True,
+                "push_url": "http://127.0.0.1:3000",
+                "access_token": "token",
+                "send_id": "1134741727",
+                "msg_type": "private",
+            },
+        )
+        config = send_push.call_args.args[0]
+        self.assertEqual(
+            [channel["provider"] for channel in config["push"]["channels"]], ["qq"]
+        )
+
+
+class WebPushTestAllProvidersTest(unittest.TestCase):
+    """9 个推送方式都能单独测试：每个只触发自己那一次发送。"""
+
+    SAMPLES = {
+        "pushplus": {"token": "token"},
+        "serverchan": {"sendkey": "sctp1234tABC"},
+        "telegram": {"token": "123:abc", "chat_id": "42"},
+        "dingrobot": {"webhook": "https://example.invalid/ding"},
+        "feishubot": {"webhook": "https://example.invalid/feishu"},
+        "wecombot": {"webhook": "https://example.invalid/wecom"},
+        "email": {
+            "smtp_host": "smtp.example.com",
+            "smtp_user": "a@example.com",
+            "smtp_password": "secret",
+            "mail_to": "b@example.com",
+        },
+        "qq": {
+            "push_url": "http://127.0.0.1:3000",
+            "access_token": "token",
+            "send_id": "",
+            "msg_type": "private",
+        },
+        "qqbot": {"app_id": "102000000", "client_secret": "secret", "user_openid": "openid"},
+    }
+
+    def test_every_provider_is_sent_alone(self):
+        from types import SimpleNamespace
+
+        from miyouqian.service.web import WebApp
+
+        for provider, fields in self.SAMPLES.items():
+            with self.subTest(provider=provider):
+                app = SimpleNamespace(
+                    lock=threading.Lock(),
+                    config={"push": {"enable": True, "channels": []}},
+                    log=Mock(),
+                )
+                payload = dict(fields, provider=provider, enable=False)
+                with patch(
+                    "miyouqian.service.web.send_push",
+                    return_value=f"推送结果: {provider}: 成功",
+                ) as send_push:
+                    result = WebApp.test_push_channels(app, payload)
+
+                scoped = send_push.call_args.args[0]
+                channels = scoped["push"]["channels"]
+                self.assertEqual([channel["provider"] for channel in channels], [provider])
+                self.assertTrue(channels[0]["enable"])
+                self.assertIs(scoped["push"]["error_only"], False)
+                self.assertIn(f"{provider}: 成功", result)
+
+    def test_all_providers_survive_normalization_with_frontend_fields(self):
+        for provider, fields in self.SAMPLES.items():
+            with self.subTest(provider=provider):
+                channels = normalize_push_channels(
+                    {"channels": [dict(fields, provider=provider, enable=True)]}
+                )
+                self.assertEqual(len(channels), 1)
+                self.assertEqual(channels[0]["provider"], provider)
+                for key, value in fields.items():
+                    self.assertEqual(str(channels[0].get(key, "")), str(value))

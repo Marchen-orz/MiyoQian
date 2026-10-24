@@ -82,6 +82,7 @@ body {
 .shop-pagination .page-btn {
   min-width: 32px;
   height: 32px;
+  padding: 0 10px;
   padding: 0 6px;
   border-radius: 6px;
   font-size: 14px;
@@ -514,17 +515,22 @@ textarea:focus {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.form-grid.three {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
 .form-grid.four {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-top: 14px;
 }
+.form-grid.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 
 .form-grid.compact {
   margin-top: 12px;
+}
+
+.task-group {
+  display: grid;
+  gap: 12px;
 }
 
 #bbsTaskGroup {
@@ -538,7 +544,6 @@ textarea:focus {
 .chips.compact {
   margin-top: 0;
 }
-
 .task-group {
   display: grid;
   gap: 12px;
@@ -548,10 +553,6 @@ textarea:focus {
   margin-top: 16px;
   padding-top: 16px;
   border-top: 1px solid var(--line);
-}
-
-.task-switch {
-  background: #fff;
 }
 
 .push-error-only {
@@ -593,7 +594,6 @@ textarea:focus {
 .push-channel-fields {
   margin-top: 0;
 }
-
 /* QQ 机器人的 OpenID 要配绑定按钮，单独竖排并占满一行 */
 .push-channel-fields > .push-field-stack,
 .push-channel-fields > .qq-bind-panel {
@@ -699,6 +699,105 @@ textarea:focus {
   font-size: 13px;
 }
 
+/* 通道 / 任务：一个条目一个按钮，点开弹窗配置 */
+.choice-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+/* 任务配置的三个按钮：一行三等分 */
+.task-buttons {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.choice-button {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  min-height: 58px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  text-align: left;
+}
+
+.choice-button-name {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text);
+}
+
+.choice-button-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.choice-button-state::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #c3d2e0;
+}
+
+.choice-button.is-configured .choice-button-state::before {
+  background: var(--accent-strong);
+}
+
+.choice-button.is-on {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.choice-button.is-on .choice-button-name {
+  color: var(--primary-strong);
+}
+
+.choice-button.is-on .choice-button-state::before {
+  background: var(--ok);
+}
+
+.push-channel-modal-flags {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.push-channel-enable {
+  margin: 0;
+}
+
+.modal-actions.push-channel-modal-actions {
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.push-channel-modal-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+/* 内容按自然高度排版；只有整张卡片顶到视口时，卡片自身才滚动。
+   不在主体上做 flex/滚动，避免亚像素误差导致内容刚好放下也冒出滚动条 */
+.choice-modal-body {
+  display: grid;
+  gap: 12px;
+  padding-right: 2px;
+}
+
+.modal-card.choice-dialog {
+  width: min(520px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+
 .task-group.is-disabled .chips,
 .task-group.is-disabled .compact {
   opacity: 0.48;
@@ -797,86 +896,380 @@ textarea:focus {
   cursor: not-allowed;
 }
 
+/* 多选项做成按钮样子，底层仍是 checkbox；按钮按列等分整行宽度 */
+.choice-toggles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.choice-toggles.cols-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.choice-toggles.cols-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.choice-toggle {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+.choice-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.choice-toggle span {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.25;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.choice-toggle:hover:not(:has(input:disabled)) span {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.choice-toggle input:checked + span {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-weight: 600;
+}
+
+.choice-toggle input:focus-visible + span {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.choice-toggle input:disabled + span {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* 和上面的禁用规则同级但排在其后，才能盖掉半透明 */
+.choice-toggle.is-disabled input + span {
+  border-style: dashed;
+  background: var(--panel-soft);
+  color: var(--muted);
+  opacity: 1;
+  cursor: help;
+}
+
+.choice-toggle input:checked + span::before {
+  content: "✓";
+  margin-right: 6px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.choice-modal-body .chips {
+  margin-top: 0;
+}
+
+#accounts {
+  display: grid;
+  gap: 10px;
+}
+
 .account-row {
   display: grid;
   gap: 12px;
-  padding: 12px;
+  padding: 14px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel-soft);
+  border-radius: 12px;
+  background: #fcfeff;
   min-width: 0;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
 }
 
-.account-main {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+.account-row:hover {
+  border-color: #c3d7ea;
+  background: #fff;
+  box-shadow: 0 8px 22px rgba(16, 32, 51, 0.06);
+}
+
+.account-row.is-editing {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(22, 141, 245, 0.1);
+}
+
+.acc-head {
+  display: flex;
+  align-items: center;
   gap: 12px;
-  align-items: center;
   min-width: 0;
 }
 
-.account-actions {
+.acc-avatar {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #55b0ff, #168df5);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.acc-avatar.tone-2 {
+  background: linear-gradient(135deg, #a78bfa, #7c5cff);
+}
+
+.acc-avatar.tone-3 {
+  background: linear-gradient(135deg, #4fd1c5, #0d9488);
+}
+
+.acc-avatar.tone-4 {
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+}
+
+.acc-avatar.tone-5 {
+  background: linear-gradient(135deg, #fb7185, #e11d48);
+}
+
+.acc-avatar.is-empty {
+  background: linear-gradient(135deg, #d7e2ec, #b3c2d1);
+}
+
+.acc-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.acc-name {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
   gap: 8px;
-  flex-wrap: nowrap;
-}
-
-.account-row + .account-row {
-  margin-top: 10px;
-}
-
-.account-title {
   min-width: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
 }
 
-.account-title strong,
-.account-title small {
-  display: flex;
-  align-items: center;
-  gap: 7px;
+.acc-name-text {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.account-title small {
-  display: block;
+.acc-pill {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.acc-pill.ok {
+  color: #0f7a52;
+  background: #e4f7ee;
+}
+
+.acc-pill.off {
+  color: #64748b;
+  background: #eef2f6;
+}
+
+.acc-pill.draft {
+  color: #a86d12;
+  background: #fff6e6;
+}
+
+.acc-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
   color: var(--muted);
   font-size: 12px;
-  padding-left: 17px;
 }
 
-.account-name-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.acc-uid {
+  font-family: ui-monospace, Consolas, "Courier New", monospace;
+  letter-spacing: 0.2px;
 }
 
-.inline-name-input {
-  width: min(360px, 100%);
-  min-height: 32px;
-  padding: 5px 8px;
+.acc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.acc-chip.on {
+  color: var(--primary-strong);
+  background: var(--primary-soft);
+}
+
+.acc-chip svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.acc-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+
+.acc-actions .spacer {
+  flex: 1 1 auto;
+}
+
+.acc-actions button {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.acc-actions button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.acc-actions .icon-only {
+  flex: 0 0 auto;
+  width: 36px;
+  padding: 0;
+}
+
+.acc-actions .danger:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: #fdf2f4;
+}
+
+.acc-edit-input {
+  width: 100%;
+  min-height: 34px;
+  padding: 5px 9px;
+  font-size: 14px;
   font-weight: 600;
 }
 
-.status-dot {
-  flex: 0 0 auto;
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  background: #c3cbd1;
+.acc-hint {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
-.status-dot.ok {
-  background: var(--ok);
+/* 列表末尾的「添加账号」卡片 */
+.acc-add-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 46px;
+  padding: 0 14px;
+  border: 1px dashed #c3d7ea;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  transition: border-color 160ms ease, color 160ms ease, background-color 160ms ease;
+}
+
+.acc-add-card:hover {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.acc-add-card svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* 空状态 */
+.acc-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 26px 16px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  background: var(--panel-soft);
+  text-align: center;
+}
+
+.acc-empty > svg {
+  width: 34px;
+  height: 34px;
+  fill: none;
+  stroke: #9fb3c6;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.acc-empty > strong {
+  font-size: 14px;
+}
+
+.acc-empty > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.acc-empty > button {
+  margin-top: 6px;
+  min-height: 36px;
+  font-size: 13px;
+}
+
+.acc-empty > button svg {
+  width: 16px;
+  height: 16px;
 }
 
 .account-cloud {
   display: grid;
   gap: 10px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-soft);
 }
 
 .account-subhead {
@@ -888,7 +1281,7 @@ textarea:focus {
 }
 
 .account-subhead strong {
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .account-subhead small {
@@ -903,9 +1296,14 @@ textarea:focus {
 
 .cloud-token-row {
   display: grid;
-  grid-template-columns: 92px minmax(0, 1fr);
+  grid-template-columns: 84px minmax(0, 1fr);
   gap: 10px;
   align-items: center;
+}
+
+.cloud-token-row input {
+  min-height: 34px;
+  font-size: 13px;
 }
 
 .cloud-token-row span {
@@ -1452,25 +1850,6 @@ textarea:focus {
   width: min(360px, calc(100vw - 32px));
 }
 
-.captcha-doc-dialog {
-  width: min(780px, 100%);
-  max-height: calc(100vh - 40px);
-  grid-template-rows: auto minmax(0, 1fr) auto;
-}
-
-.captcha-doc-text {
-  margin: 0;
-  padding: 14px;
-  overflow: auto;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel-soft);
-  font-size: 12.5px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
 .geetest-box {
   min-height: 260px;
   display: grid;
@@ -1536,16 +1915,15 @@ textarea:focus {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .account-row {
+  .choice-buttons {
     grid-template-columns: 1fr;
   }
 
-  .account-main {
+  .push-channel-modal-flags {
     grid-template-columns: 1fr;
   }
 
-  .account-actions {
-    justify-content: flex-start;
+  .acc-actions {
     flex-wrap: wrap;
   }
 
@@ -1598,6 +1976,12 @@ textarea:focus {
     padding-top: 18px;
   }
 
+  .choice-toggles,
+  .choice-toggles.cols-3,
+  .choice-toggles.cols-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .actions {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1622,16 +2006,24 @@ textarea:focus {
     grid-column: 1 / -1;
   }
 
-  .account-actions {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 8px;
-    width: 100%;
+  .acc-actions {
+    flex-wrap: wrap;
   }
 
-  .account-actions button,
+  .acc-actions .spacer {
+    display: none;
+  }
+
+  .acc-actions button {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .acc-actions .icon-only {
+    flex: 0 0 auto;
+  }
+
   .icon-only {
-    width: 100%;
     min-width: 0;
   }
 

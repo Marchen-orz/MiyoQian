@@ -52,6 +52,10 @@
       <symbol id="i-x" viewBox="0 0 24 24">
         <path d="M18 6 6 18M6 6l12 12"></path>
       </symbol>
+      <symbol id="i-user" viewBox="0 0 24 24">
+        <circle cx="12" cy="8" r="4"></circle>
+        <path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"></path>
+      </symbol>
     </svg>
 
     <main class="shell">
@@ -125,17 +129,6 @@
                 </span>
                 <span class="disclosure" aria-hidden="true"></span>
               </summary>
-              <div class="section-toolbar">
-                <button
-                  class="ghost"
-                  id="addAccountBtn"
-                  type="button"
-                  title="添加账号"
-                >
-                  <svg><use href="#i-plus"></use></svg>
-                  <span>添加</span>
-                </button>
-              </div>
               <div id="accounts"></div>
             </details>
 
@@ -147,54 +140,7 @@
                 </span>
                 <span class="disclosure" aria-hidden="true"></span>
               </summary>
-              <div class="task-group" id="gameTaskGroup">
-                <label class="check-row task-switch">
-                  <input id="gameCheckin" type="checkbox" data-autosave />
-                  <span>游戏社区签到</span>
-                </label>
-                <div class="chips" id="gameChips"></div>
-              </div>
-              <div class="task-group" id="cloudGameTaskGroup">
-                <label class="check-row task-switch">
-                  <input id="cloudGameCheckin" type="checkbox" data-autosave />
-                  <span>云游戏签到</span>
-                </label>
-                <div class="chips" id="cloudGameChips"></div>
-              </div>
-              <div class="task-group" id="bbsTaskGroup">
-                <label class="check-row task-switch">
-                  <input id="bbsTasks" type="checkbox" data-autosave />
-                  <span>米游币任务</span>
-                </label>
-                <label class="check-row task-switch">
-                  <input id="bbsCheckin" type="checkbox" data-autosave />
-                  <span>社区签到</span>
-                </label>
-                <div class="chips compact" id="bbsForumChips"></div>
-                <div class="form-grid three compact">
-                  <label
-                    class="check-row disabled"
-                    title="米游社改版，社区互动已无法获取米游币，待新获取方式更新~"
-                  >
-                    <input id="bbsLike" type="checkbox" data-autosave disabled />
-                    <span>点赞</span>
-                  </label>
-                  <label
-                    class="check-row disabled"
-                    title="米游社改版，社区互动已无法获取米游币，待新获取方式更新~"
-                  >
-                    <input id="bbsRead" type="checkbox" data-autosave disabled />
-                    <span>看帖</span>
-                  </label>
-                  <label
-                    class="check-row disabled"
-                    title="米游社改版，社区互动已无法获取米游币，待新获取方式更新~"
-                  >
-                    <input id="bbsShare" type="checkbox" data-autosave disabled />
-                    <span>分享</span>
-                  </label>
-                </div>
-              </div>
+              <div class="choice-buttons task-buttons" id="taskButtons"></div>
             </details>
 
             <details class="panel">
@@ -236,26 +182,11 @@
               <summary>
                 <span>
                   <strong>推送通道</strong>
-                  <small>任务结束后通知</small>
+                  <small>任务结束后通知，点击通道按钮配置</small>
                 </span>
                 <span class="disclosure" aria-hidden="true"></span>
               </summary>
-              <div class="section-toolbar">
-                <button
-                  class="ghost"
-                  id="pushTestBtn"
-                  type="button"
-                  title="测试所有启用的推送渠道"
-                >
-                  <svg><use href="#i-play"></use></svg>
-                  <span>测试推送</span>
-                </button>
-              </div>
-              <label class="check-row">
-                <input id="pushErrorOnly" type="checkbox" data-autosave />
-                <span>仅失败时推送</span>
-              </label>
-              <div class="push-channel-list" id="pushChannels"></div>
+              <div class="choice-buttons" id="pushChannels"></div>
             </details>
 
             <details class="panel">

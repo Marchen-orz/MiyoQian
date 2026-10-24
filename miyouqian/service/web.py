@@ -30,6 +30,7 @@ from ..core.config import (
     load_config,
     log_path,
     normalize_config,
+    normalize_push_channels,
     save_config,
     validate_unique_account_uids,
 )
@@ -196,15 +197,27 @@ class WebApp:
             self.log(push_result, "push")
         return []
 
-    def test_push_channels(self) -> str:
+    def test_push_channels(self, channel: dict[str, Any] | None = None) -> str:
         with self.lock:
             config = copy.deepcopy(self.config)
-        channels = push_channels(config.get("push") or {})
-        if not channels:
-            raise ValueError("请先启用至少一个推送通道")
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         message = f"这是一条推送测试消息\n发送时间: {now}\n如收到消息，说明该通道可用"
-        result = send_push(config, "米游签推送测试", message, success=False)
+        if isinstance(channel, dict) and channel.get("provider"):
+            # 弹窗里的参数可能还没保存，测试直接用它算出来的通道。
+            # 这里拼一份只含该通道、总开关打开的临时配置，复用普通的 send_push，
+            # 不依赖 notifier 额外参数，旧版 notifier 也能正常工作。
+            targets = normalize_push_channels({"channels": [channel]})
+            if not targets:
+                raise ValueError("请先填写该通道的参数")
+            # send_push 只会发 enable 的通道，这里强制标记一下
+            for target in targets:
+                target["enable"] = True
+            scoped = {"push": {"enable": True, "error_only": False, "channels": targets}}
+            result = send_push(scoped, "米游签推送测试", message, success=False)
+        else:
+            if not push_channels(config.get("push") or {}):
+                raise ValueError("请先启用至少一个推送通道")
+            result = send_push(config, "米游签推送测试", message, success=False)
         if result:
             self.log(result, "push")
         return result or "推送测试已完成"
@@ -1153,8 +1166,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"ok": True})
                 return
             if path == "/api/push/test":
-                result = self.app.test_push_channels()
-                self.send_json({"ok": True, "result": result})
+                channel = payload.get("channel") if isinstance(payload, dict) else None
+                result = self.app.test_push_channels(channel)
+                # single 让页面能判断服务端是否已支持「只测单条通道」
+                self.send_json(
+                    {"ok": True, "result": result, "single": isinstance(channel, dict)}
+                )
                 return
             if path == "/api/qqbot/bind":
                 self.app.start_qq_bind(payload)

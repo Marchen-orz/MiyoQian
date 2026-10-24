@@ -133,6 +133,25 @@ test("qqbot is offered as its own channel next to the onebot QQ channel", () => 
   assert.ok(options.includes("qq"));
 });
 
+test("every push provider has a button, so each can be tested on its own", () => {
+  const providers = ui.__myqPushChannelOptions.map(([value]) => value).sort();
+  // vm 里的数组原型不同，用 JSON 比较结构
+  assert.equal(
+    JSON.stringify(providers),
+    JSON.stringify([
+      "dingrobot",
+      "email",
+      "feishubot",
+      "pushplus",
+      "qq",
+      "qqbot",
+      "serverchan",
+      "telegram",
+      "wecombot",
+    ]),
+  );
+});
+
 test("the qqbot form exposes AppID, AppSecret and both binding buttons", () => {
   const html = ui.pushChannelFields("qqbot", { provider: "qqbot", enable: true });
   assert.match(html, /AppID/);

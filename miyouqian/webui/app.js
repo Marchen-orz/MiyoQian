@@ -47,15 +47,21 @@ const bbsForumOptions = [
   ["2", "原神"],
   ["6", "崩坏：星穹铁道"],
   ["8", "绝区零"],
-  ["9", "崩坏：因缘精灵"],
   ["1", "崩坏3"],
   ["3", "崩坏学园2"],
   ["4", "未定事件簿"],
+  ["9", "崩坏：因缘精灵"]
 ];
 const defaultBbsForums = ["5", "2"];
 const bbsInteractionDisabledReason =
-  "米游社改版，社区互动已无法获取米游币，待新获取方式更新~";
+    "米游社改版，社区互动已无法获取米游币，待新获取方式更新~";
 
+// 任务配置里的三个模块，和推送通道一样用按钮 + 弹窗
+const taskModules = [
+  ["game", "游戏社区签到"],
+  ["cloud", "云游戏签到"],
+  ["bbs", "米游币任务"],
+];
 let config = null;
 let toastTimer = null;
 let autoSaveTimer = null;
@@ -67,7 +73,10 @@ let loginCountdownTimer = null;
 let loginErrorCollapseTimer = null;
 let editingAccountIndex = null;
 let expandedCloudAccounts = new Set();
-let editingPushProviders = new Set();
+let pushModalProvider = null; // 当前在弹窗里配置的推送通道，null 表示弹窗关闭
+let pushModalEl = null;       // 弹窗遮罩层元素
+let taskModalKind = null;     // 当前在弹窗里配置的任务（game / cloud / bbs）
+let taskModalEl = null;
 let qqBindState = null;
 let qqBindTimer = null;
 let qqBindTarget = "";
@@ -75,19 +84,20 @@ let qqBindRestored = false;
 let editingCaptchaProviders = new Set();
 let logsPinnedToBottom = true;
 let activeView = "dashboard";
+let shopRunningProgress = {};
 let shopGoods = [];
 let shopGames = [{ key: "", name: "全部分区" }];
 let shopSelectedGame = "";
 let shopOpenPlans = new Set();
-let shopRunningProgress = {};
 let shopRequestInFlight = false;
 let shopGoodsLoading = false;
 let shopGoodsLoadSeq = 0;
 let shopExchangeNowGoodsId = "";
 let shopPlanAddressCache = new Map();
-let shopFilterStatus = "";        // 商品状态筛选："" 全部 / sold_out / available
+let shopFilterStatus = '';
 let shopCurrentPage = 1;          // 当前页码，从1开始
 const SHOP_PAGE_SIZE = 4;        // 每页显示商品数
+
 
 const $ = (id) => document.getElementById(id);
 
@@ -132,36 +142,29 @@ function renderConfig() {
   $("scheduleJitter").value = config.schedule?.jitter_minutes ?? 45;
   $("runOnStart").checked = Boolean(config.schedule?.run_on_start ?? false);
 
-  $("gameCheckin").checked = Boolean(config.features?.game_checkin ?? true);
-  $("cloudGameCheckin").checked = Boolean(
-    config.features?.cloud_game_checkin ?? false,
-  );
-  $("bbsTasks").checked = Boolean(config.features?.bbs_tasks ?? false);
-  $("bbsCheckin").checked = Boolean(config.bbs?.checkin ?? true);
-  $("bbsRead").checked = false;
-  $("bbsLike").checked = false;
-  $("bbsShare").checked = false;
-  setBbsInteractionDisabled();
-
-  $("pushErrorOnly").checked = Boolean(config.push?.error_only ?? false);
   $("captchaMaxRetries").value = config.captcha?.max_retries ?? 3;
+  // 任务开关都在「任务配置」的弹窗里，这里刷新按钮和（如果开着的）弹窗内容
+  renderTaskButtons();
   renderGames();
   renderCloudGames();
   renderBbsForums();
   renderPushChannels();
   renderCaptchaChannels();
   updateTaskDependencyState();
+  renderTaskModalBody();
   renderAccounts();
   renderShopConfig();
 }
 
 function renderGames() {
+  const host = $("gameChips");
+  if (!host) return;
   const enabled = new Set(config.games?.enabled || []);
-  $("gameChips").innerHTML = gameOptions
+  host.innerHTML = gameOptions
     .map(
       ([key, label]) => `
-        <label class="chip">
-          <input type="checkbox" data-game="${key}" data-autosave ${enabled.has(key) ? "checked" : ""} />
+        <label class="choice-toggle">
+          <input type="checkbox" data-game="${key}" ${enabled.has(key) ? "checked" : ""} />
           <span>${label}</span>
         </label>
       `,
@@ -171,13 +174,15 @@ function renderGames() {
 }
 
 function renderCloudGames() {
+  const host = $("cloudGameChips");
+  if (!host) return;
   const enabled = new Set(config.cloud_games?.enabled || []);
-  $("cloudGameChips").innerHTML = cloudGameOptions
+  host.innerHTML = cloudGameOptions
     .map(([key, label, disabled, reason]) => {
       const title = reason ? ` title="${escapeAttr(reason)}"` : "";
       return `
         <label class="chip ${disabled ? "disabled" : ""}"${title}>
-          <input type="checkbox" data-cloud-game="${key}" data-autosave ${enabled.has(key) ? "checked" : ""} ${disabled ? 'data-cloud-game-disabled="1" disabled' : ""} />
+          <input type="checkbox" data-cloud-game="${key}" ${enabled.has(key) ? "checked" : ""} ${disabled ? 'data-cloud-game-disabled="1" disabled' : ""} />
           <span>${label}</span>
         </label>
       `;
@@ -187,42 +192,51 @@ function renderCloudGames() {
 }
 
 function renderBbsForums() {
+  const host = $("bbsForumChips");
+  if (!host) return;
   const enabled = new Set(
-    (config.bbs?.forums || defaultBbsForums).map((id) => String(id)),
+      (config.bbs?.forums || defaultBbsForums).map((id) => String(id)),
   );
-  $("bbsForumChips").innerHTML = bbsForumOptions
-    .map(
-      ([key, label]) => `
-        <label class="chip">
-          <input type="checkbox" data-bbs-forum="${key}" data-autosave ${enabled.has(key) ? "checked" : ""} />
+  host.innerHTML = bbsForumOptions
+      .map(
+          ([key, label]) => `
+        <label class="choice-toggle">
+          <input type="checkbox" data-bbs-forum="${key}" ${enabled.has(key) ? "checked" : ""} />
           <span>${label}</span>
         </label>
       `,
-    )
-    .join("");
+      )
+      .join("");
   updateTaskDependencyState();
 }
 
+// 任务开关只在弹窗里存在；关掉对应开关时把下面的选项置灰
 function updateTaskDependencyState() {
-  const gameEnabled = $("gameCheckin").checked;
-  const cloudEnabled = $("cloudGameCheckin").checked;
-  const bbsEnabled = $("bbsTasks").checked;
-  setTaskGroupDisabled("gameTaskGroup", "[data-game]", !gameEnabled);
-  setTaskGroupDisabled(
-    "cloudGameTaskGroup",
-    "[data-cloud-game]:not([data-cloud-game-disabled])",
-    !cloudEnabled,
-  );
+  const gameToggle = $("gameCheckin");
+  const cloudToggle = $("cloudGameCheckin");
+  const bbsToggle = $("bbsTasks");
+  const bbsCheckin = $("bbsCheckin");
+
+  if (gameToggle) {
+    setTaskGroupDisabled("gameTaskGroup", "[data-game]", !gameToggle.checked);
+  }
+  if (cloudToggle) {
+    setTaskGroupDisabled(
+      "cloudGameTaskGroup",
+      "[data-cloud-game]:not([data-cloud-game-disabled])",
+      !cloudToggle.checked,
+    );
+  }
+  if (bbsToggle) {
+    setTaskGroupDisabled("bbsTaskGroup", "#bbsCheckin", !bbsToggle.checked);
+  }
+  if (bbsToggle && bbsCheckin) {
+    const forumsEnabled = bbsToggle.checked && bbsCheckin.checked;
+    $("bbsForumChips")?.classList.toggle("is-hidden", !forumsEnabled);
+    setTaskGroupDisabled("bbsTaskGroup", "[data-bbs-forum]", !forumsEnabled);
+  }
+
   updateAccountCloudGameInputs();
-  setTaskGroupDisabled(
-    "bbsTaskGroup",
-    "#bbsCheckin",
-    !bbsEnabled,
-  );
-  const bbsCheckinEnabled = bbsEnabled && $("bbsCheckin").checked;
-  $("bbsForumChips").classList.toggle("is-hidden", !bbsCheckinEnabled);
-  setTaskGroupDisabled("bbsTaskGroup", "[data-bbs-forum]", !bbsCheckinEnabled);
-  setBbsInteractionDisabled();
 }
 
 function setTaskGroupDisabled(groupId, selector, disabled) {
@@ -234,17 +248,48 @@ function setTaskGroupDisabled(groupId, selector, disabled) {
   });
 }
 
-function setBbsInteractionDisabled() {
-  ["bbsRead", "bbsLike", "bbsShare"].forEach((id) => {
-    const input = $(id);
-    if (!input) return;
-    input.checked = false;
-    input.disabled = true;
-    const row = input.closest(".check-row");
-    if (row) {
-      row.classList.add("disabled");
-      row.title = bbsInteractionDisabledReason;
-    }
+function taskModuleLabel(kind) {
+  const item = taskModules.find(([key]) => key === kind);
+  return item ? item[1] : kind;
+}
+
+function taskModuleEnabled(kind) {
+  if (kind === "game") return Boolean(config.features?.game_checkin ?? true);
+  if (kind === "cloud") {
+    return Boolean(config.features?.cloud_game_checkin ?? false);
+  }
+  return Boolean(config.features?.bbs_tasks ?? false);
+}
+
+function taskModuleStateText(kind) {
+  if (!taskModuleEnabled(kind)) return "已关闭";
+  if (kind === "game") {
+    return `已启用 · ${(config.games?.enabled || []).length} 个游戏`;
+  }
+  if (kind === "cloud") {
+    return `已启用 · ${(config.cloud_games?.enabled || []).length} 个云游戏`;
+  }
+  const forums = (config.bbs?.forums || defaultBbsForums).length;
+  return `已启用 · ${forums} 个版块`;
+}
+
+function renderTaskButtons() {
+  const host = $("taskButtons");
+  if (!host) return;
+  host.innerHTML = taskModules
+    .map(([kind, label]) => {
+      const classes = ["choice-button"];
+      if (taskModuleEnabled(kind)) classes.push("is-on");
+      return `
+        <button class="${classes.join(" ")}" type="button" data-open-task="${kind}" title="配置${escapeAttr(label)}">
+          <span class="choice-button-name">${escapeHtml(label)}</span>
+          <span class="choice-button-state">${taskModuleStateText(kind)}</span>
+        </button>
+      `;
+    })
+    .join("");
+  host.querySelectorAll("[data-open-task]").forEach((button) => {
+    button.addEventListener("click", () => openTaskModal(button.dataset.openTask));
   });
 }
 
@@ -258,53 +303,44 @@ function updateAccountCloudGameInputs() {
   });
 }
 
+function pushChannelLabel(provider) {
+  const option = pushChannelOptions.find(([key]) => key === provider);
+  return option ? option[1] : provider;
+}
+
+function pushChannelStateText(channel) {
+  if (channel?.enable) return "已启用";
+  return hasPushChannelConfig(channel) ? "已关闭" : "未配置";
+}
+
 function renderPushChannels() {
-  const channels = config.push?.channels || [];
   const byProvider = new Map(
-    channels.map((channel) => [channel.provider, channel]),
+    (config.push?.channels || []).map((channel) => [channel.provider, channel]),
   );
+  // 每个通道只占一个按钮，点开后在弹窗里填写参数
   $("pushChannels").innerHTML = pushChannelOptions
     .map(([provider, label]) => {
       const channel = byProvider.get(provider);
-      const enabled = Boolean(channel?.enable);
-      const editing = editingPushProviders.has(provider);
-      const configured = hasPushChannelConfig(channel);
+      const classes = ["choice-button"];
+      if (channel?.enable) {
+        classes.push("is-on");
+      } else if (hasPushChannelConfig(channel)) {
+        classes.push("is-configured");
+      }
       return `
-        <div class="push-channel" data-push-provider="${provider}">
-          <div class="push-channel-main">
-            <label class="check-row push-channel-toggle">
-              <input type="checkbox" data-push-toggle="${provider}" ${enabled ? "checked" : ""} />
-              <span>${label}</span>
-            </label>
-            <div class="push-channel-actions">
-              ${
-                configured && !editing
-                  ? `<button class="ghost icon-only" type="button" data-edit-push="${provider}" title="编辑${label}配置">
-                      <svg><use href="#i-edit"></use></svg>
-                    </button>`
-                  : ""
-              }
-              ${
-                editing
-                  ? `<button class="primary" type="button" data-save-push="${provider}" title="保存${label}配置">
-                      <svg><use href="#i-save"></use></svg>
-                      <span>保存</span>
-                    </button>`
-                  : ""
-              }
-            </div>
-          </div>
-          ${
-            provider === "qqbot" && (editing || qqBindTarget)
-              ? qqBotBindPanel()
-              : ""
-          }
-          ${editing ? pushChannelFields(provider, channel || emptyPushChannel(provider)) : pushChannelHiddenFields(channel)}
-        </div>
+        <button class="${classes.join(" ")}" type="button" data-open-push="${provider}" title="配置${escapeAttr(label)}">
+          <span class="choice-button-name">${escapeHtml(label)}</span>
+          <span class="choice-button-state">${pushChannelStateText(channel)}</span>
+        </button>
       `;
     })
     .join("");
-  bindPushChannelEvents();
+  renderPushChannelModal();
+  document.querySelectorAll("[data-open-push]").forEach((button) => {
+    button.addEventListener("click", () =>
+      openPushChannelModal(button.dataset.openPush),
+    );
+  });
   lockQqBotFieldsWhileBinding();
   loadQqBindState();
 }
@@ -330,15 +366,15 @@ async function loadQqBindState() {
     if (!state.running) return;
     qqBindState = state;
     qqBindTarget = state.target || "";
-    editingPushProviders.add("qqbot");
-    renderPushChannels();
+    // 绑定进度只有 qqbot 的弹窗里能展示，恢复进度时顺手把弹窗打开
+    openPushChannelModal("qqbot");
     scheduleQqBindPoll();
   } catch (error) {
     // 拿不到状态不影响其他功能，用户重新点一次绑定即可
   }
 }
 
-function bindPushChannelEvents() {
+function bindQqBindEvents() {
   document.querySelectorAll("[data-qqbind]").forEach((button) => {
     button.addEventListener("click", () => {
       startQqBind(button.dataset.qqbind).catch((error) => showToast(error.message));
@@ -349,58 +385,386 @@ function bindPushChannelEvents() {
       cancelQqBind().catch((error) => showToast(error.message));
     });
   });
-  document.querySelectorAll("[data-push-toggle]").forEach((input) => {
-    input.addEventListener("change", () => {
-      collectConfig();
-      const provider = input.dataset.pushToggle;
-      if (input.checked) {
-        const existingChannel = findPushChannel(provider);
-        upsertPushChannel({
-          ...emptyPushChannel(provider),
-          ...(existingChannel || {}),
-          enable: true,
-        });
-        if (!hasPushChannelConfig(existingChannel)) {
-          editingPushProviders.add(provider);
-        } else {
-          editingPushProviders.delete(provider);
-          autoSaveConfig()
-            .then(() => showToast("推送通道已启用"))
-            .catch((error) => showToast(error.message));
-        }
-        renderPushChannels();
-        return;
-      }
-      upsertPushChannel({
-        ...emptyPushChannel(provider),
-        ...(findPushChannel(provider) || {}),
-        enable: false,
-      });
-      editingPushProviders.delete(provider);
-      renderPushChannels();
-      autoSaveConfig()
-        .then(() => showToast("推送通道已关闭"))
-        .catch((error) => showToast(error.message));
-    });
+}
+
+// ---------------------------------------------------------------------------
+// 推送通道弹窗：一个通道就是一个按钮，点开后在这里填写参数并保存
+// ---------------------------------------------------------------------------
+function openPushChannelModal(provider) {
+  if (!provider) return;
+  if (pushModalEl) closePushChannelModal();
+  if (taskModalEl) closeTaskModal();
+  const channel = findPushChannel(provider);
+  const label = pushChannelLabel(provider);
+  pushModalProvider = provider;
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-card choice-dialog" data-push-provider="${escapeAttr(provider)}" role="dialog" aria-modal="true" aria-labelledby="pushChannelModalTitle">
+      <div class="modal-head">
+        <div>
+          <strong id="pushChannelModalTitle">${escapeHtml(label)}</strong>
+          <p data-push-modal-state>${pushChannelStateText(channel)}</p>
+        </div>
+        <button class="ghost icon-only" type="button" data-push-modal-close title="关闭">
+          <svg><use href="#i-x"></use></svg>
+        </button>
+      </div>
+      <div class="push-channel-modal-flags">
+        <label class="check-row push-channel-enable">
+          <input type="checkbox" data-push-toggle="${escapeAttr(provider)}" ${channel?.enable ? "checked" : ""} />
+          <span>启用此通道</span>
+        </label>
+        <label class="check-row push-channel-enable" title="所有推送通道共用这个开关">
+          <input type="checkbox" data-push-error-only ${config.push?.error_only ? "checked" : ""} />
+          <span>仅失败时推送</span>
+        </label>
+      </div>
+      <div class="choice-modal-body" data-push-modal-body></div>
+      <div class="modal-actions push-channel-modal-actions">
+        <button class="ghost" type="button" data-push-modal-test title="只测试当前这个通道，不触发其它渠道（无需保存或启用）">
+          <svg><use href="#i-play"></use></svg>
+          <span>测试推送</span>
+        </button>
+        <div class="push-channel-modal-buttons">
+          <button class="ghost" type="button" data-push-modal-close>取消</button>
+          <button class="primary" type="button" data-push-modal-save>
+            <svg><use href="#i-save"></use></svg>
+            <span>保存</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+  const toast = document.querySelector(".toast");
+  document.body.insertBefore(overlay, toast || null);
+  pushModalEl = overlay;
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) closePushChannelModal();
   });
-  document.querySelectorAll("[data-edit-push]").forEach((button) => {
-    button.addEventListener("click", () => {
-      collectConfig();
-      editingPushProviders.add(button.dataset.editPush);
-      renderPushChannels();
-    });
+  overlay.querySelectorAll("[data-push-modal-close]").forEach((button) => {
+    button.addEventListener("click", () => closePushChannelModal());
   });
-  document.querySelectorAll("[data-save-push]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      try {
-        collectConfig();
-        editingPushProviders.delete(button.dataset.savePush);
-        await saveConfig("推送通道已保存");
-      } catch (error) {
-        showToast(error.message);
-      }
+  overlay
+    .querySelector("[data-push-modal-save]")
+    .addEventListener("click", () => {
+      savePushChannel().catch((error) => showToast(error.message));
     });
+  overlay
+    .querySelector("[data-push-modal-test]")
+    .addEventListener("click", (event) => {
+      testPushChannel(event.currentTarget).catch((error) =>
+        showToast(error.message),
+      );
+    });
+  overlay.querySelector("[data-push-error-only]").addEventListener("change", (event) => {
+    // 这是全局开关，改完立即保存，所有弹窗里看到的都是同一个值
+    config.push = config.push || {};
+    config.push.error_only = event.target.checked;
+    autoSaveConfig()
+      .then(() => showToast(event.target.checked ? "已改为仅失败时推送" : "已改为每次都推送"))
+      .catch((error) => showToast(error.message));
   });
+  document.addEventListener("keydown", pushChannelModalKeydown);
+  renderPushChannelModal();
+  const firstField = overlay.querySelector(
+    "[data-push-modal-body] input:not([type='hidden']):not([disabled])",
+  );
+  firstField?.focus({ preventScroll: true });
+}
+
+function pushChannelModalKeydown(event) {
+  if (event.key === "Escape") closePushChannelModal();
+}
+
+function closePushChannelModal() {
+  if (!pushModalEl) return;
+  document.removeEventListener("keydown", pushChannelModalKeydown);
+  pushModalEl.remove();
+  pushModalEl = null;
+  pushModalProvider = null;
+}
+
+function renderPushChannelModal() {
+  if (!pushModalProvider || !pushModalEl) return;
+  const provider = pushModalProvider;
+  const channel = findPushChannel(provider);
+  const toggle = pushModalEl.querySelector("[data-push-toggle]");
+  if (toggle) toggle.checked = Boolean(channel?.enable);
+  const errorOnly = pushModalEl.querySelector("[data-push-error-only]");
+  if (errorOnly) errorOnly.checked = Boolean(config.push?.error_only);
+  const state = pushModalEl.querySelector("[data-push-modal-state]");
+  if (state) state.textContent = pushChannelStateText(channel);
+  const body = pushModalEl.querySelector("[data-push-modal-body]");
+  if (!body) return;
+  body.innerHTML = `
+    ${provider === "qqbot" ? qqBotBindPanel() : ""}
+    ${pushChannelFields(provider, channel || emptyPushChannel(provider))}
+  `;
+  bindQqBindEvents();
+  lockQqBotFieldsWhileBinding();
+}
+
+// 弹窗里填的参数只在这里写回内存配置，取消/关闭不会落盘
+function syncPushChannelFromModal() {
+  if (!pushModalProvider || !pushModalEl) return null;
+  const card = pushModalEl.querySelector("[data-push-provider]");
+  if (!card) return null;
+  const provider = pushModalProvider;
+  const channel = cleanPushChannel(collectPushChannel(card));
+  const channels = (config.push?.channels || []).filter(
+    (item) => item.provider !== provider,
+  );
+  if (shouldSavePushChannel(channel)) channels.push(channel);
+  config.push = config.push || {};
+  config.push.channels = channels;
+  config.push.enable = channels.some((item) => item.enable);
+  return channel;
+}
+
+// 用弹窗里当前填写的参数测这一条通道，不需要先保存，也不受启用开关影响
+async function testPushChannel(button) {
+  if (!pushModalProvider || !pushModalEl) return;
+  const label = pushChannelLabel(pushModalProvider);
+  const card = pushModalEl.querySelector("[data-push-provider]");
+  if (!card) return;
+  const channel = cleanPushChannel(collectPushChannel(card));
+  if (!hasPushChannelConfig(channel)) {
+    showToast(`请先填写${label}的参数再测试`);
+    return;
+  }
+  if (button) button.disabled = true;
+  showToast(`正在发送${label}测试消息…`);
+  try {
+    const response = await api("/api/push/test", {
+      method: "POST",
+      body: JSON.stringify({ channel }),
+    });
+    // 旧版服务端没有 single 字段：它会忽略 channel，把已启用的通道全测一遍
+    if (response.single !== true) {
+      showToast("服务端还在运行旧代码，本次测试可能触发了多个通道，请重启米游签服务");
+      return;
+    }
+    showToast(response.result || "推送测试已完成");
+  } catch (error) {
+    // 旧版服务端会忽略 channel 参数，只在有启用通道时才测试
+    if (String(error.message || "").includes("请先启用至少一个推送通道")) {
+      throw new Error("服务端还在运行旧代码，请重启米游签服务后再测试");
+    }
+    throw error;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function savePushChannel() {
+  if (!pushModalProvider || !pushModalEl) return;
+  const label = pushChannelLabel(pushModalProvider);
+  const before = JSON.parse(JSON.stringify(config.push?.channels || []));
+  const channel = syncPushChannelFromModal();
+  if (!channel) return;
+  if (channel.enable && !hasPushChannelConfig(channel)) {
+    // 没填参数就打开开关没有意义，回滚并提示
+    config.push.channels = before;
+    config.push.enable = before.some((item) => item.enable);
+    showToast(`请先填写${label}的参数再启用`);
+    return;
+  }
+  try {
+    await autoSaveConfig();
+  } catch (error) {
+    config.push.channels = before;
+    config.push.enable = before.some((item) => item.enable);
+    showToast(error.message);
+    return;
+  }
+  closePushChannelModal();
+  renderPushChannels();
+  showToast(channel.enable ? `${label} 已保存并启用` : `${label} 已保存`);
+}
+
+// ---------------------------------------------------------------------------
+// 任务配置弹窗：游戏社区签到 / 云游戏签到 / 米游币任务
+// ---------------------------------------------------------------------------
+function bbsInteractionToggle(label) {
+  return `
+    <label class="choice-toggle is-disabled" title="${escapeAttr(bbsInteractionDisabledReason)}">
+      <input type="checkbox" disabled />
+      <span>${label}</span>
+    </label>
+  `;
+}
+
+function openTaskModal(kind) {
+  if (!kind) return;
+  if (taskModalEl) closeTaskModal();
+  if (pushModalEl) closePushChannelModal();
+  taskModalKind = kind;
+  const label = taskModuleLabel(kind);
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-card choice-dialog task-modal-dialog" data-task-kind="${escapeAttr(kind)}" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
+      <div class="modal-head">
+        <div>
+          <strong id="taskModalTitle">${escapeHtml(label)}</strong>
+          <p data-task-modal-state>${taskModuleStateText(kind)}</p>
+        </div>
+        <button class="ghost icon-only" type="button" data-task-modal-close title="关闭">
+          <svg><use href="#i-x"></use></svg>
+        </button>
+      </div>
+      <div class="choice-modal-body" data-task-modal-body></div>
+      <div class="modal-actions">
+        <button class="ghost" type="button" data-task-modal-close>取消</button>
+        <button class="primary" type="button" data-task-modal-save>
+          <svg><use href="#i-save"></use></svg>
+          <span>保存</span>
+        </button>
+      </div>
+    </div>
+  `;
+  const toast = document.querySelector(".toast");
+  document.body.insertBefore(overlay, toast || null);
+  taskModalEl = overlay;
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) closeTaskModal();
+  });
+  overlay.querySelectorAll("[data-task-modal-close]").forEach((button) => {
+    button.addEventListener("click", () => closeTaskModal());
+  });
+  overlay.querySelector("[data-task-modal-save]").addEventListener("click", () => {
+    saveTaskModal().catch((error) => showToast(error.message));
+  });
+  // 开关一动，下面的选项立刻跟着置灰 / 显示
+  overlay.addEventListener("change", () => updateTaskDependencyState());
+  document.addEventListener("keydown", taskModalKeydown);
+  renderTaskModalBody();
+}
+
+function taskModalKeydown(event) {
+  if (event.key === "Escape") closeTaskModal();
+}
+
+function closeTaskModal() {
+  if (!taskModalEl) return;
+  document.removeEventListener("keydown", taskModalKeydown);
+  taskModalEl.remove();
+  taskModalEl = null;
+  taskModalKind = null;
+}
+
+function renderTaskModalBody() {
+  if (!taskModalKind || !taskModalEl) return;
+  const kind = taskModalKind;
+  const body = taskModalEl.querySelector("[data-task-modal-body]");
+  if (!body) return;
+  const state = taskModalEl.querySelector("[data-task-modal-state]");
+  if (state) state.textContent = taskModuleStateText(kind);
+
+  if (kind === "game") {
+    body.innerHTML = `
+      <label class="check-row">
+        <input id="gameCheckin" type="checkbox" ${taskModuleEnabled("game") ? "checked" : ""} />
+        <span>启用游戏社区签到</span>
+      </label>
+      <div class="task-group" id="gameTaskGroup">
+        <div class="choice-toggles cols-3" id="gameChips"></div>
+      </div>
+    `;
+    renderGames();
+    return;
+  }
+  if (kind === "cloud") {
+    body.innerHTML = `
+      <label class="check-row">
+        <input id="cloudGameCheckin" type="checkbox" ${taskModuleEnabled("cloud") ? "checked" : ""} />
+        <span>启用云游戏签到</span>
+      </label>
+      <div class="task-group" id="cloudGameTaskGroup">
+        <div class="chips" id="cloudGameChips"></div>
+      </div>
+    `;
+    renderCloudGames();
+    return;
+  }
+  body.innerHTML = `
+    <label class="check-row">
+      <input id="bbsTasks" type="checkbox" ${taskModuleEnabled("bbs") ? "checked" : ""} />
+      <span>启用米游币任务</span>
+    </label>
+    <div class="task-group" id="bbsTaskGroup">
+      <div class="choice-toggles cols-4">
+        <label class="choice-toggle">
+          <input id="bbsCheckin" type="checkbox" ${config.bbs?.checkin !== false ? "checked" : ""} />
+          <span>社区签到</span>
+        </label>
+        ${bbsInteractionToggle("点赞")}
+        ${bbsInteractionToggle("看帖")}
+        ${bbsInteractionToggle("分享")}
+      </div>
+      <div class="choice-toggles cols-3" id="bbsForumChips"></div>
+    </div>
+  `;
+  renderBbsForums();
+}
+
+function checkedInputValues(selector, read) {
+  return Array.from(document.querySelectorAll(`${selector}:checked`)).map(read);
+}
+
+async function saveTaskModal() {
+  if (!taskModalKind || !taskModalEl) return;
+  const kind = taskModalKind;
+  const label = taskModuleLabel(kind);
+  const before = JSON.parse(
+    JSON.stringify({
+      features: config.features || {},
+      games: config.games || {},
+      cloud_games: config.cloud_games || {},
+      bbs: config.bbs || {},
+    }),
+  );
+  config.features = { ...(config.features || {}) };
+  config.games = { ...(config.games || {}) };
+  config.cloud_games = { ...(config.cloud_games || {}) };
+  config.bbs = { ...(config.bbs || {}) };
+  if (kind === "game") {
+    config.features.game_checkin = Boolean($("gameCheckin")?.checked);
+    config.games.enabled = checkedInputValues(
+      "[data-game]",
+      (input) => input.dataset.game,
+    );
+  } else if (kind === "cloud") {
+    config.features.cloud_game_checkin = Boolean($("cloudGameCheckin")?.checked);
+    config.cloud_games.enabled = checkedInputValues(
+      "[data-cloud-game]",
+      (input) => input.dataset.cloudGame,
+    );
+  } else {
+    config.features.bbs_tasks = Boolean($("bbsTasks")?.checked);
+    config.bbs.checkin = Boolean($("bbsCheckin")?.checked);
+    config.bbs.forums = checkedInputValues(
+      "[data-bbs-forum]",
+      (input) => Number(input.dataset.bbsForum),
+    );
+    config.bbs.read = false;
+    config.bbs.like = false;
+    config.bbs.share = false;
+  }
+  try {
+    await autoSaveConfig();
+  } catch (error) {
+    config.features = before.features;
+    config.games = before.games;
+    config.cloud_games = before.cloud_games;
+    config.bbs = before.bbs;
+    showToast(error.message);
+    return;
+  }
+  closeTaskModal();
+  renderTaskButtons();
+  showToast(`${label} 已保存`);
 }
 
 function pushChannelFields(provider, channel) {
@@ -458,8 +822,7 @@ function pushChannelFields(provider, channel) {
       <input data-push-field="${name}" type="checkbox" ${common[name] ? "checked" : ""} />
       <span>${label}</span>
     </label>
-  `;
-  // OpenID 可以手填，也可以用下面的绑定按钮自动获取；手填时提示去哪儿找
+  `;  // OpenID 可以手填，也可以用下面的绑定按钮自动获取；手填时提示去哪儿找
   const openidField = (name, placeholder) => `
     <input data-push-field="${name}" type="text" value="${escapeAttr(common[name] || "")}" placeholder="${escapeAttr(placeholder)}" autocomplete="off" />
   `;
@@ -491,14 +854,14 @@ function pushChannelFields(provider, channel) {
       selectBox("message_format", "消息格式", { text: "纯文本", markdown: "Markdown" }),
       field("api_base", "接口地址（可留空）"),
       below(
-        "私聊 OpenID",
-        openidField("user_openid", "可手填；或点按钮后用 QQ 私聊机器人发送验证码自动获取"),
-        qqBindButton("user", "绑定私聊"),
+          "私聊 OpenID",
+          openidField("user_openid", "可手填；或点按钮后用 QQ 私聊机器人发送验证码自动获取"),
+          qqBindButton("user", "绑定私聊"),
       ),
       below(
-        "群 OpenID",
-        openidField("group_openid", "可手填；或点按钮后把机器人拉进群、在群里 @机器人"),
-        qqBindButton("group", "绑定群聊"),
+          "群 OpenID",
+          openidField("group_openid", "可手填；或点按钮后把机器人拉进群、在群里 @机器人"),
+          qqBindButton("group", "绑定群聊"),
       ),
     ],
     telegram: [
@@ -525,6 +888,7 @@ function pushChannelFields(provider, channel) {
       checkbox("smtp_ssl", "使用 SSL"),
     ],
   };
+
 
   const fieldsHtml = (fields[provider] || []).join("");
   return `<div class="push-channel-fields form-grid two compact">${fieldsHtml}</div>`;
@@ -562,9 +926,9 @@ function qqBotBindPanel() {
     }
   } else if (state.running) {
     const hint =
-      qqBindTarget === "group"
-        ? "把机器人拉进群，或在群里 @机器人 发送："
-        : "用 QQ 私聊机器人，发送：";
+        qqBindTarget === "group"
+            ? "把机器人拉进群，或在群里 @机器人 发送："
+            : "用 QQ 私聊机器人，发送：";
     body = `<span>${escapeHtml(state.message || `正在等待${targetLabel}消息`)}<br />${hint}<code class="qq-bind-code">${escapeHtml(state.verify_code || "······")}</code></span>
       <div class="qq-bind-actions">
         <button class="ghost" type="button" data-qqbind-cancel="1">取消绑定</button>
@@ -580,16 +944,17 @@ async function startQqBind(target) {
     showToast("已有绑定正在进行，请稍候");
     return;
   }
+  // 弹窗里刚填的 AppID/AppSecret 还没保存，先收进内存再校验
+  syncPushChannelFromModal();
   collectConfig();
   const channel = cleanPushChannel(
-    findPushChannel("qqbot") || emptyPushChannel("qqbot"),
+      findPushChannel("qqbot") || emptyPushChannel("qqbot"),
   );
   if (!channel.app_id || !channel.client_secret) {
     throw new Error("请先填写 AppID 和 AppSecret 再绑定");
   }
   qqBindTarget = target;
   qqBindState = { running: true, status: "starting", message: "正在连接 QQ 网关", verify_code: "" };
-  editingPushProviders.add("qqbot");
   renderPushChannels();
   try {
     const state = await api("/api/qqbot/bind", {
@@ -647,14 +1012,14 @@ function finishQqBind(state) {
     // 服务端在绑定成功时已经把 OpenID 写进 config.yaml 了，这里重新拉一次配置，
     // 让页面显示的 AppID/AppSecret/OpenID 和磁盘上的保持一致
     loadConfig()
-      .then(() => {
-        renderPushChannels();
-        showToast(`已绑定并保存${target === "group" ? "群聊" : "私聊"} OpenID`);
-      })
-      .catch((error) => {
-        renderPushChannels();
-        showToast(`已绑定，但刷新配置失败：${error.message}`);
-      });
+        .then(() => {
+          renderPushChannels();
+          showToast(`已绑定并保存${target === "group" ? "群聊" : "私聊"} OpenID`);
+        })
+        .catch((error) => {
+          renderPushChannels();
+          showToast(`已绑定，但刷新配置失败：${error.message}`);
+        });
     return;
   }
   renderPushChannels();
@@ -676,22 +1041,6 @@ function emptyPushChannel(provider) {
   return cleanPushChannel({ provider, enable: true });
 }
 
-function upsertPushChannel(channel) {
-  config.push = config.push || {};
-  config.push.channels = config.push.channels || [];
-  const index = config.push.channels.findIndex(
-    (item) => item.provider === channel.provider,
-  );
-  if (index === -1) {
-    config.push.channels.push(channel);
-  } else {
-    config.push.channels[index] = {
-      ...config.push.channels[index],
-      ...channel,
-    };
-  }
-}
-
 function findPushChannel(provider) {
   return (
     (config.push?.channels || []).find((item) => item.provider === provider) ||
@@ -701,28 +1050,14 @@ function findPushChannel(provider) {
 
 function hasPushChannelConfig(channel) {
   if (!channel) return false;
-  const configKeys = [
-    "token",
-    "webhook",
-    "topic",
-    "chat_id",
-    "api_url",
-    "secret",
-    "push_url",
-    "access_token",
-    "send_id",
-    "msg_type",
-    "app_id",
-    "client_secret",
-    "user_openid",
-    "group_openid",
-    "smtp_host",
-    "smtp_user",
-    "smtp_password",
-    "mail_from",
-    "mail_to",
-  ];
-  return configKeys.some((key) => String(channel[key] || "").trim());
+  // 直接按该通道支持的字段判断，避免漏掉 sendkey 这类只在少数通道出现的键
+  return pushChannelFieldNames(channel.provider).some((key) => {
+    if (key === "smtp_port") return Number(channel[key] || 465) !== 465;
+    if (key === "smtp_ssl") return channel[key] === false;
+    if (key === "message_format") return channel[key] === "markdown";
+    if (key === "plain_text") return Boolean(channel[key]);
+    return String(channel[key] || "").trim();
+  });
 }
 
 function pushChannelFieldNames(provider) {
@@ -885,6 +1220,7 @@ function bindCaptchaChannelEvents() {
       }
     });
   });
+
   document.querySelectorAll("[data-captcha-doc-view]").forEach((button) => {
     button.addEventListener("click", () => {
       showCustomCaptchaDoc().catch((error) => showToast(error.message));
@@ -975,13 +1311,13 @@ async function showCustomCaptchaDoc() {
     if (event.target === overlay) close();
   });
   overlay
-    .querySelectorAll("[data-captcha-doc-close]")
-    .forEach((button) => button.addEventListener("click", close));
+      .querySelectorAll("[data-captcha-doc-close]")
+      .forEach((button) => button.addEventListener("click", close));
   overlay
-    .querySelector("[data-captcha-doc-dialog-copy]")
-    .addEventListener("click", () => {
-      copyCustomCaptchaDoc().catch((error) => showToast(error.message));
-    });
+      .querySelector("[data-captcha-doc-dialog-copy]")
+      .addEventListener("click", () => {
+        copyCustomCaptchaDoc().catch((error) => showToast(error.message));
+      });
 }
 
 function captchaChannelFields(provider, channel) {
@@ -1077,67 +1413,28 @@ function hasCaptchaChannelConfig(channel) {
 
 function renderAccounts() {
   const accounts = config.accounts || [];
+  const cards = accounts
+    .map((account, index) => accountCard(account, index))
+    .join("");
   $("accounts").innerHTML = accounts.length
-    ? accounts
-        .map(
-          (account, index) => `
-        <div class="account-row" data-index="${index}" data-draft="${account._draft ? "1" : "0"}">
-          <div class="account-main">
-            <div class="account-title">
-              <strong>
-                <span class="status-dot ${account.stuid ? "ok" : ""}"></span>
-                ${
-                  editingAccountIndex === index
-                    ? `<input class="inline-name-input" data-field="name" type="text" maxlength="10" placeholder="最多 10 字" value="${escapeAttr(account.name || "")}" />`
-                    : `<span class="account-name-text">${escapeHtml(accountLabel(account))}</span><input data-field="name" type="hidden" value="${escapeAttr(account.name || "")}" />`
-                }
-              </strong>
-              <small>${account.stuid ? `UID ${escapeHtml(account.stuid)}` : "未登录"}</small>
-            </div>
-            <div class="account-actions">
-              ${
-                editingAccountIndex === index
-                  ? `
-                    <button class="primary" type="button" data-save-account="${index}" title="保存账号名">
-                      <svg><use href="#i-save"></use></svg>
-                      <span>保存</span>
-                    </button>
-                    <button class="ghost icon-only" type="button" data-cancel-account="${index}" title="取消编辑">
-                      <svg><use href="#i-x"></use></svg>
-                    </button>
-                  `
-                  : `
-                    <button class="ghost icon-only" type="button" data-edit-account="${index}" title="编辑账号名">
-                      <svg><use href="#i-edit"></use></svg>
-                    </button>
-                  `
-              }
-              <button class="ghost" type="button" data-login="${index}" title="登录方式">
-                <svg><use href="#i-phone"></use></svg>
-                <span>${account.stuid ? "刷新" : "登录"}</span>
-              </button>
-              <button class="ghost icon-only ${hasAccountCloudToken(account) || expandedCloudAccounts.has(index) ? "is-active" : ""}" type="button" data-toggle-cloud="${index}" title="云游戏签到凭证">
-                <svg><use href="#i-cloud"></use></svg>
-              </button>
-              <button class="ghost icon-only" type="button" data-remove="${index}" title="删除账号">
-                <svg><use href="#i-trash"></use></svg>
-              </button>
-            </div>
-          </div>
-          <input data-field="stuid" type="hidden" value="${escapeAttr(account.stuid || "")}" />
-          <input data-field="stoken" type="hidden" value="${escapeAttr(account.stoken || "")}" />
-          <input data-field="mid" type="hidden" value="${escapeAttr(account.mid || "")}" />
-          <textarea class="hidden-field" data-field="cookie">${escapeHtml(account.cookie || "")}</textarea>
-          ${accountCloudGameFields(account, index)}
-          <div class="account-login-slot" data-login-slot="${index}"></div>
-        </div>
-      `,
-        )
-        .join("")
-    : `<div class="empty-state">
-        <strong>暂无账号</strong>
-        <span>添加账号后，可在账号卡片内登录。</span>
+    ? `${cards}
+       <button class="acc-add-card" type="button" data-add-account>
+         <svg><use href="#i-plus"></use></svg>
+         <span>添加账号</span>
+       </button>`
+    : `<div class="acc-empty">
+        <svg><use href="#i-user"></use></svg>
+        <strong>还没有账号</strong>
+        <span>添加后可以选择扫码或验证码登录</span>
+        <button class="primary" type="button" data-add-account>
+          <svg><use href="#i-plus"></use></svg>
+          <span>添加账号</span>
+        </button>
       </div>`;
+
+  document.querySelectorAll("[data-add-account]").forEach((button) => {
+    button.addEventListener("click", addAccount);
+  });
   document.querySelectorAll("[data-login]").forEach((button) => {
     button.addEventListener("click", () => {
       showLoginMethods(Number(button.dataset.login)).catch((error) =>
@@ -1230,6 +1527,102 @@ function renderAccounts() {
   updateTaskDependencyState();
 }
 
+function getFilteredGoods() {
+  if (shopFilterStatus === "sold_out") {
+    return shopGoods.filter((good) => isShopGoodSoldOut(good));
+  }
+  if (shopFilterStatus === "available") {
+    return shopGoods.filter(
+        (good) => !isShopGoodSoldOut(good) && canShopGoodExchangeNow(good),
+    );
+  }
+  return shopGoods;
+}
+
+function accountCard(account, index) {
+  const editing = editingAccountIndex === index;
+  const loggedIn = Boolean(account.stuid);
+  const cloudCount = accountCloudCount(account);
+  const cloudOpen = expandedCloudAccounts.has(index);
+  const nameField = editing
+    ? `<input class="acc-edit-input" data-field="name" type="text" maxlength="10" placeholder="最多 10 字" value="${escapeAttr(account.name || "")}" />`
+    : `<span class="acc-name-text">${escapeHtml(accountLabel(account))}</span>
+       <input data-field="name" type="hidden" value="${escapeAttr(account.name || "")}" />`;
+  const meta = loggedIn
+    ? `<span class="acc-uid">UID ${escapeHtml(account.stuid)}</span>
+       <span class="acc-chip ${cloudCount ? "on" : ""}">
+         <svg><use href="#i-cloud"></use></svg>${cloudCount ? `云游戏 ${cloudCount}/2` : "云游戏未配置"}
+       </span>`
+    : `<span>还没有登录，点「登录方式」扫码或验证码登录</span>`;
+  const actions = editing
+    ? `<span class="spacer"></span>
+       <button class="ghost" type="button" data-cancel-account="${index}">
+         <svg><use href="#i-x"></use></svg>
+         <span>取消</span>
+       </button>
+       <button class="primary" type="button" data-save-account="${index}">
+         <svg><use href="#i-save"></use></svg>
+         <span>保存</span>
+       </button>`
+    : `<button class="${loggedIn ? "ghost" : "primary"}" type="button" data-login="${index}">
+         <svg><use href="#i-phone"></use></svg>
+         <span>${loggedIn ? "刷新登录" : "登录方式"}</span>
+       </button>
+       <button class="ghost ${cloudOpen || cloudCount ? "is-active" : ""}" type="button" data-toggle-cloud="${index}" title="云游戏签到凭证">
+         <svg><use href="#i-cloud"></use></svg>
+         <span>云游戏凭证</span>
+       </button>
+       <span class="spacer"></span>
+       <button class="ghost icon-only" type="button" data-edit-account="${index}" title="编辑账号名">
+         <svg><use href="#i-edit"></use></svg>
+       </button>
+       <button class="ghost icon-only danger" type="button" data-remove="${index}" title="删除账号">
+         <svg><use href="#i-trash"></use></svg>
+       </button>`;
+
+  return `
+    <article class="account-row acc-card ${editing ? "is-editing" : ""}" data-index="${index}" data-draft="${account._draft ? "1" : "0"}">
+      <div class="acc-head">
+        <span class="acc-avatar tone-${accountTone(account)} ${loggedIn ? "" : "is-empty"}">${escapeHtml(accountInitial(account))}</span>
+        <div class="acc-body">
+          <div class="acc-name">
+            ${nameField}
+            <span class="acc-pill ${loggedIn ? "ok" : "off"}">${loggedIn ? "已登录" : "未登录"}</span>
+            ${account._draft ? `<span class="acc-pill draft">未保存</span>` : ""}
+          </div>
+          <div class="acc-meta">${meta}</div>
+          ${editing ? `<div class="acc-hint">最多 10 个字，仅用于本地显示</div>` : ""}
+        </div>
+      </div>
+      <div class="acc-actions">${actions}</div>
+      <input data-field="stuid" type="hidden" value="${escapeAttr(account.stuid || "")}" />
+      <input data-field="stoken" type="hidden" value="${escapeAttr(account.stoken || "")}" />
+      <input data-field="mid" type="hidden" value="${escapeAttr(account.mid || "")}" />
+      <textarea class="hidden-field" data-field="cookie">${escapeHtml(account.cookie || "")}</textarea>
+      ${accountCloudGameFields(account, index)}
+      <div class="account-login-slot" data-login-slot="${index}"></div>
+    </article>
+  `;
+}
+
+function accountInitial(account) {
+  const chars = Array.from(accountLabel(account).trim());
+  return (chars[0] || "?").toUpperCase();
+}
+
+function accountTone(account) {
+  let hash = 0;
+  for (const char of accountLabel(account)) {
+    hash = (hash * 31 + char.codePointAt(0)) % 997;
+  }
+  return (hash % 5) + 1;
+}
+
+function accountCloudCount(account) {
+  const tokens = account.cloud_games?.tokens || {};
+  return ["genshin", "zzz"].filter((key) => String(tokens[key] || "").trim()).length;
+}
+
 function accountCloudGameFields(account, index) {
   const cloudGames = account.cloud_games || {};
   const tokens = cloudGames.tokens || {};
@@ -1266,13 +1659,6 @@ function accountCloudGameHiddenFields(tokens) {
   `;
 }
 
-function hasAccountCloudToken(account) {
-  const tokens = account.cloud_games?.tokens || {};
-  return Boolean(
-    String(tokens.genshin || "").trim() || String(tokens.zzz || "").trim(),
-  );
-}
-
 function shiftExpandedCloudAccounts(removedIndex) {
   const shifted = new Set();
   expandedCloudAccounts.forEach((index) => {
@@ -1289,37 +1675,21 @@ function collectConfig() {
     jitter_minutes: Number($("scheduleJitter").value || 0),
     run_on_start: $("runOnStart").checked,
   };
-  config.features = {
-    game_checkin: $("gameCheckin").checked,
-    cloud_game_checkin: $("cloudGameCheckin").checked,
-    bbs_tasks: $("bbsTasks").checked,
-  };
+  // 任务开关和游戏 / 版块选择都在「任务配置」弹窗里保存时写回，这里保持内存值
+  config.features = config.features || {};
   config.games = config.games || {};
-  config.games.enabled = Array.from(
-    document.querySelectorAll("[data-game]:checked"),
-  ).map((input) => input.dataset.game);
   config.cloud_games = config.cloud_games || {};
-  config.cloud_games.enabled = Array.from(
-    document.querySelectorAll("[data-cloud-game]:checked"),
-  ).map((input) => input.dataset.cloudGame);
   config.bbs = {
     ...(config.bbs || {}),
-    checkin: $("bbsCheckin").checked,
-    forums: Array.from(
-      document.querySelectorAll("[data-bbs-forum]:checked"),
-    ).map((input) => Number(input.dataset.bbsForum)),
     read: false,
     like: false,
     share: false,
   };
-  config.push = {
-    ...(config.push || {}),
-    error_only: $("pushErrorOnly").checked,
-  };
-  config.push.channels = Array.from(
-    document.querySelectorAll("[data-push-provider]"),
-  )
-    .map((row) => collectPushChannel(row))
+  // 「仅失败时推送」在通道弹窗里改，值直接维护在 config 上，不再从 DOM 读
+  config.push = config.push || {};
+  // 通道参数在弹窗里编辑、保存时写回内存，这里只做规整和过滤，
+  // 不能从 DOM 重建，否则弹窗外的通道会被整条丢掉
+  config.push.channels = (config.push.channels || [])
     .map((channel) => cleanPushChannel(channel))
     .filter((channel) => shouldSavePushChannel(channel));
   config.push.enable = config.push.channels.some((channel) => channel.enable);
@@ -1358,7 +1728,7 @@ function collectPushChannel(row) {
   channel.enable = Boolean(toggle ?.checked);
   row.querySelectorAll("[data-push-field]").forEach((field) => {
     if (["smtp_ssl", "plain_text"].includes(field.dataset.pushField)) {
-    channel[field.dataset.pushField] = field.type === "checkbox" ? field.checked: field.value === "true";
+      channel[field.dataset.pushField] = field.type === "checkbox" ? field.checked: field.value === "true";
   } else if (field.type === "checkbox") {
     channel[field.dataset.pushField] = field.checked;
   } else if (field.tagName === "SELECT") {
@@ -1408,9 +1778,11 @@ function renderShopConfig() {
   $("shopRetryInterval").value = shop.retry_interval ?? 0.4;
   $("shopPush").checked = Boolean(shop.push ?? false);
   if ($("shopGoodsMetric")) {
+    const total = shopGoods.length;
+    const totalPages = Math.max(1, Math.ceil(total / SHOP_PAGE_SIZE));
     $("shopGoodsMetric").textContent = shopGoodsLoading
         ? "加载中"
-        : `${shopGoods.length} 件`;
+        : `${total} 件`;
   }
   if ($("shopPlansMetric"))
     $("shopPlansMetric").textContent = String((shop.plans || []).length);
@@ -1431,18 +1803,6 @@ function renderShopGameFilter() {
     .join("");
 }
 
-function getFilteredGoods() {
-  if (shopFilterStatus === "sold_out") {
-    return shopGoods.filter((good) => isShopGoodSoldOut(good));
-  }
-  if (shopFilterStatus === "available") {
-    return shopGoods.filter(
-      (good) => !isShopGoodSoldOut(good) && canShopGoodExchangeNow(good),
-    );
-  }
-  return shopGoods;
-}
-
 function renderShopGoodsLoadingState() {
   const select = $("shopGameFilter");
   const button = $("shopRefreshBtn");
@@ -1453,12 +1813,10 @@ function renderShopGoodsLoadingState() {
   button.classList.toggle("is-loading", shopGoodsLoading);
   if (label) label.textContent = shopGoodsLoading ? "加载中" : "刷新商品";
 }
-
 function renderShopGoods() {
   const list = $("shopGoods");
   if (!list) return;
 
-  // 加载中状态
   if (shopGoodsLoading) {
     list.innerHTML = `<div class="empty-state shop-empty shop-loading">
         <span class="qr-loading" aria-hidden="true"></span>
@@ -1469,7 +1827,6 @@ function renderShopGoods() {
     return;
   }
 
-  // 先按状态筛选，再计算分页
   const filtered = getFilteredGoods();
   const total = filtered.length;
   const totalPages = Math.max(1, Math.ceil(total / SHOP_PAGE_SIZE));
@@ -1478,10 +1835,9 @@ function renderShopGoods() {
   const start = (shopCurrentPage - 1) * SHOP_PAGE_SIZE;
   const pageGoods = filtered.slice(start, start + SHOP_PAGE_SIZE);
 
-  // 渲染商品卡片
   if (pageGoods.length) {
     list.innerHTML = pageGoods
-        .map((good) => shopGoodCard(good, shopGoods.indexOf(good)))  // 传递在完整列表里的全局索引
+        .map((good) => shopGoodCard(good, shopGoods.indexOf(good)))  // 全局索引
         .join("");
   } else {
     list.innerHTML = `<div class="empty-state shop-empty">
@@ -1493,9 +1849,7 @@ function renderShopGoods() {
   bindShopGoodsEvents();
   renderShopPagination();
 }
-
-function renderShopPagination() {
-  // 查找或创建分页容器
+function renderShopPagination(){
   let container = $("shopPagination");
   const list = $("shopGoods");
 
@@ -1505,21 +1859,20 @@ function renderShopPagination() {
     container.className = "shop-pagination";
     list.parentNode.insertBefore(container, list.nextSibling);
   }
-
   if (!container) return;
 
-  // 加载中，或筛选后不足一页 / 无数据时，隐藏分页
-  const filteredCount = shopGoodsLoading ? 0 : getFilteredGoods().length;
-  if (filteredCount <= SHOP_PAGE_SIZE) {
+  // 加载中或筛选后不足一页 / 无数据 → 隐藏分页
+  const filtered = shopGoodsLoading ? [] : getFilteredGoods();
+  if (filtered.length <= SHOP_PAGE_SIZE) {
     container.innerHTML = "";
     container.style.display = "none";
     return;
   }
   container.style.display = "flex";
 
-  // 构建分页 HTML
-  const total = Math.max(1, Math.ceil(filteredCount / SHOP_PAGE_SIZE));
+  const total = Math.max(1, Math.ceil(filtered.length / SHOP_PAGE_SIZE));
   if (shopCurrentPage > total) shopCurrentPage = total;
+  if (shopCurrentPage < 1) shopCurrentPage = 1;
   const current = shopCurrentPage;
 
   let html = `
@@ -1528,7 +1881,6 @@ function renderShopPagination() {
     </button>
   `;
 
-  // 页码列表（智能显示：首尾 + 当前页前后各2页）
   const pages = getVisiblePages(current, total);
   for (const p of pages) {
     if (p === "...") {
@@ -1547,7 +1899,6 @@ function renderShopPagination() {
 
   container.innerHTML = html;
 
-  // 绑定事件
   container.querySelectorAll("[data-page]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const page = btn.dataset.page;
@@ -1561,13 +1912,11 @@ function renderShopPagination() {
         return;
       }
       renderShopGoods();
-      // 滚动到商品列表顶部
       const listEl = $("shopGoods");
       if (listEl) listEl.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   });
 }
-
 // 辅助函数：计算可见页码列表
 function getVisiblePages(current, total) {
   const maxVisible = 7;  // 最多显示7个页码
@@ -1658,14 +2007,12 @@ function renderShopPlans() {
       </div>`;
   bindShopPlanEvents();
 }
-
 // 计划绑定的是账号的 stuid，下标只是当前列表里的位置；找不到绑定账号时返回 -1
 function shopPlanAccountIndex(plan, accounts) {
   const stuid = String(plan.account_stuid || "");
   if (!stuid) return Number(plan.account_index || 0);
   return accounts.findIndex((account) => String(account.stuid || "") === stuid);
 }
-
 function shopPlanRow(plan, index) {
   const accounts = config.accounts || [];
   const paused = plan.enable === false;
@@ -1676,19 +2023,19 @@ function shopPlanRow(plan, index) {
   const selectedAccount = shopPlanAccountIndex(plan, accounts);
   // 计划绑定的账号已不在列表里时单独占一项，不能让下拉框悄悄落到第一个账号上
   const missingOption =
-    selectedAccount < 0
-      ? `<option value="" data-stuid="${escapeAttr(plan.account_stuid || "")}" selected>账号已删除，请重新选择</option>`
-      : "";
+      selectedAccount < 0
+          ? `<option value="" data-stuid="${escapeAttr(plan.account_stuid || "")}" selected>账号已删除，请重新选择</option>`
+          : "";
   const accountOptions =
-    accounts.length || missingOption
-      ? missingOption +
-        accounts
-          .map((account, accountIndex) => {
-            const selected = accountIndex === selectedAccount ? "selected" : "";
-            return `<option value="${accountIndex}" data-stuid="${escapeAttr(account.stuid || "")}" ${selected}>${escapeHtml(accountLabel(account))}</option>`;
-          })
-          .join("")
-      : `<option value="0">暂无账号</option>`;
+      accounts.length || missingOption
+          ? missingOption +
+          accounts
+              .map((account, accountIndex) => {
+                const selected = accountIndex === selectedAccount ? "selected" : "";
+                return `<option value="${accountIndex}" data-stuid="${escapeAttr(account.stuid || "")}" ${selected}>${escapeHtml(accountLabel(account))}</option>`;
+              })
+              .join("")
+          : `<option value="0">暂无账号</option>`;
   return `
     <details class="shop-plan ${paused ? "is-paused" : ""}" data-shop-plan="${index}" ${open}>
       <summary class="shop-plan-summary">
@@ -2362,8 +2709,8 @@ function shopPlanStatus(plan, index) {
     const attempt = Number(progress.attempt || 0);
     const message = progress.message || "兑换中";
     return attempt > 0
-      ? `兑换中 · 第 ${attempt} 次尝试 · ${message}`
-      : `兑换中 · ${message}`;
+        ? `兑换中 · 第 ${attempt} 次尝试 · ${message}`
+        : `兑换中 · ${message}`;
   }
   if (plan.last_result) {
     return `${plan.enable === false ? "已暂停，" : ""}最近结果：${plan.last_result}`;
@@ -2512,6 +2859,7 @@ async function refreshStatus() {
   const runningPlans = new Set(exchangeScheduler.running_plans || []);
   const runningCount = exchangeScheduler.running_count ?? runningPlans.size;
   shopRunningProgress = exchangeScheduler.running_progress || {};
+
 
   if ($("shopScheduleMetric")) {
     $("shopScheduleMetric").textContent = runningCount > 0
@@ -3182,16 +3530,6 @@ async function runNow() {
   await refreshStatus();
 }
 
-async function testPushNow() {
-  await autoSaveConfig();
-  const response = await api("/api/push/test", {
-    method: "POST",
-    body: "{}",
-  });
-  showToast(response.result || "推送测试已完成");
-  await refreshStatus();
-}
-
 function addAccount() {
   collectConfig();
   config.accounts.push(emptyAccount(nextAccountName()));
@@ -3417,11 +3755,10 @@ function injectArrowSymbol() {
 }
 
 function bindEvents() {
-  document
-    .querySelectorAll("summary button, summary input")
-    .forEach((control) => {
-      control.addEventListener("click", (event) => event.stopPropagation());
-    });
+  document.querySelectorAll("summary button, summary input")
+      .forEach((control) => {
+        control.addEventListener("click", (event) => event.stopPropagation());
+      });
   $("shopStatusFilter")?.addEventListener("change", (event) => {
     shopFilterStatus = event.target.value;
     shopCurrentPage = 1;
@@ -3429,53 +3766,37 @@ function bindEvents() {
   });
   document.addEventListener("change", (event) => {
     if (event.target?.matches?.("[data-autosave]")) {
-      if (
-        event.target.id === "gameCheckin" ||
-        event.target.id === "cloudGameCheckin" ||
-        event.target.id === "bbsTasks" ||
-        event.target.id === "bbsCheckin"
-      ) {
-        updateTaskDependencyState();
-      }
       scheduleAutoSave();
     }
   });
   document.addEventListener("input", (event) => {
     if (
-      event.target?.matches?.(
-        'input[type="time"][data-autosave], input[type="datetime-local"][data-autosave], input[type="number"][data-autosave], input[type="text"][data-autosave], select[data-autosave], [data-account-cloud-token][data-autosave]',
-      )
+        event.target?.matches?.(
+            'input[type="time"][data-autosave], input[type="datetime-local"][data-autosave], input[type="number"][data-autosave], input[type="text"][data-autosave], select[data-autosave], [data-account-cloud-token][data-autosave]',
+        )
     ) {
       scheduleAutoSave();
     }
   });
   $("refreshBtn").addEventListener("click", () => {
     Promise.all([loadConfig(), refreshStatus()]).catch((error) =>
-      showToast(error.message),
+        showToast(error.message),
     );
   });
   $("runBtn").addEventListener("click", () =>
-    runNow().catch((error) => showToast(error.message)),
-  );
-  $("pushTestBtn")?.addEventListener("click", () =>
-    testPushNow().catch((error) => showToast(error.message)),
+      runNow().catch((error) => showToast(error.message)),
   );
   $("logs").addEventListener("scroll", () => {
     logsPinnedToBottom = isScrolledNearBottom($("logs"));
-  });
-  $("addAccountBtn").addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    addAccount();
   });
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => switchView(button.dataset.view));
   });
   $("shopRefreshBtn")?.addEventListener("click", () =>
-    loadShopGoods().catch((error) => showToast(error.message)),
+      loadShopGoods().catch((error) => showToast(error.message)),
   );
   $("shopGameFilter")?.addEventListener("change", () =>
-    loadShopGoods().catch((error) => showToast(error.message)),
+      loadShopGoods().catch((error) => showToast(error.message)),
   );
 }
 
