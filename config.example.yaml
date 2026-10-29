@@ -6,6 +6,7 @@ enable: true
 accounts:
   []
 # 账号凭据（cookie、stoken、云游戏 tokens 等）存储在 data/credentials.yaml 中
+# 每个账号可设置 region: cn（国服，默认）或 os（国际服 HoYoLAB，只支持游戏社区签到）
 
 storage:
   data_dir: data
