@@ -38,9 +38,12 @@ from ..core.config import (
 )
 from ..core.http import ApiClient
 from ..core.logs import append_log, configure_logger, format_line, print_startup_banner
-from ..core.profile import fetch_avatar_url
+from ..core.profile import fetch_avatar_url, fetch_os_avatar_url
 from ..core.qq_bot import bind_openid as bind_qq_openid
 from ..core.qq_bot import generate_verify_code
+from ..core.region import REGION_CN, REGION_OS, account_region
+from ..overseas.checkin import probe_hoyolab_cookie
+from ..overseas.cookie import parse_hoyolab_cookie
 from ..tasks.shop_exchange import ShopExchange
 from .exchange_scheduler import ExchangeScheduler
 from .notifier import send_push, send_task_push, send_exchange_push, push_channels
@@ -286,22 +289,29 @@ class WebApp:
         else:
             self.log("配置已保存，未检测到配置项变化", "config")
 
-    def account_avatars(self, uids: list[str]) -> dict[str, Any]:
-        """账号在米游社的头像地址。纯展示用，取不到的账号不出现在结果里，页面继续用默认头像。"""
-        uids = list(dict.fromkeys(uid for uid in uids if uid.isascii() and uid.isdigit() and len(uid) <= 20))
-        uids = uids[:AVATAR_MAX_UIDS]
+    def account_avatars(self, keys: list[str]) -> dict[str, Any]:
+        """账号头像地址。键写成 uid（国服）或 os:uid（国际服），两边的 UID 可能撞号。
+
+        纯展示用，取不到的账号不出现在结果里，页面继续用默认头像。
+        """
+        keys = list(dict.fromkeys(key for key in map(parse_avatar_key, keys) if key))
+        keys = keys[:AVATAR_MAX_UIDS]
         now = time.monotonic()
         with self.lock:
-            cached = {uid: self._avatar_cache[uid] for uid in uids if uid in self._avatar_cache}
-        pending = [uid for uid in uids if uid not in cached or cached[uid][0] <= now]
+            cached = {key: self._avatar_cache[key] for key in keys if key in self._avatar_cache}
+        pending = [key for key in keys if key not in cached or cached[key][0] <= now]
         fresh: dict[str, tuple[float, str]] = {}
         if pending:
-            def lookup(uid: str) -> tuple[str, tuple[float, str]]:
+            def lookup(key: str) -> tuple[str, tuple[float, str]]:
+                region, sep, uid = key.partition(":")
+                if not sep:
+                    region, uid = REGION_CN, key
+                fetch = fetch_os_avatar_url if region == REGION_OS else fetch_avatar_url
                 try:
-                    return uid, (now + AVATAR_CACHE_SECONDS, fetch_avatar_url(client, uid))
+                    return key, (now + AVATAR_CACHE_SECONDS, fetch(client, uid))
                 except Exception as exc:
-                    self.log(f"账号头像获取失败: {uid}，{exc}", "web")
-                    return uid, (now + AVATAR_RETRY_SECONDS, "")
+                    self.log(f"账号头像获取失败: {key}，{exc}", "web")
+                    return key, (now + AVATAR_RETRY_SECONDS, "")
 
             # 网络差时单个请求可能要等很久（比如 IPv6 不通要先等超时），并发取免得账号越多越慢
             with ApiClient(timeout=8.0) as client, ThreadPoolExecutor(max_workers=min(len(pending), 5)) as pool:
@@ -309,7 +319,7 @@ class WebApp:
             with self.lock:
                 self._avatar_cache.update(fresh)
         known = {**cached, **fresh}
-        return {"avatars": {uid: known[uid][1] for uid in uids if known[uid][1]}}
+        return {"avatars": {key: known[key][1] for key in keys if known[key][1]}}
 
     def shop_goods(self, game: str = "") -> dict[str, Any]:
         game_label = game or "全部分区"
@@ -555,6 +565,8 @@ class WebApp:
             if account_index < 0 or account_index >= len(accounts):
                 raise ValueError("请选择已登录账号")
             account = copy.deepcopy(accounts[account_index])
+        if account_region(account) != REGION_CN:
+            raise ValueError("商店兑换只支持国服账号")
         if not str(account.get("cookie") or "").strip():
             raise ValueError("账号未登录或缺少 cookie")
         return account
@@ -575,6 +587,7 @@ class WebApp:
             account_snapshot = dict(account_payload or {})
             if not draft:
                 account_snapshot = dict(accounts[account_index])
+            ensure_login_region(account_snapshot, REGION_CN)
             account_name = display_account_name(account_snapshot)
             self.login_state = {
                 "running": True,
@@ -666,6 +679,7 @@ class WebApp:
         account_index: int,
         account_payload: dict[str, Any] | None,
         draft: bool,
+        region: str = REGION_CN,
     ) -> tuple[dict[str, Any], str]:
         with self.lock:
             accounts = self.config.get("accounts") or []
@@ -675,7 +689,41 @@ class WebApp:
             if not draft:
                 account_snapshot = dict(accounts[account_index])
             account_name = display_account_name(account_snapshot)
+        ensure_login_region(account_snapshot, region)
         return account_snapshot, account_name
+
+    def complete_login_cookie(
+        self,
+        account_index: int,
+        cookie: str,
+        account_payload: dict[str, Any] | None = None,
+        draft: bool = False,
+    ) -> dict[str, Any]:
+        """国际服登录：没有扫码 / 验证码，直接收下用户粘贴的 HoYoLAB cookie。"""
+        account_data = parse_hoyolab_cookie(cookie)
+        # 格式对了不代表 cookie 还有效，先拿一次只读的 info 请求试一下
+        status = probe_hoyolab_cookie(account_data["cookie"])
+        if status == "invalid":
+            raise ValueError("HoYoLAB 提示 cookie 无效或已过期，请重新复制一次")
+        account_snapshot, account_name = self._login_account_snapshot(
+            account_index, account_payload, draft, REGION_OS
+        )
+        account = self._save_login_account(account_index, account_snapshot, account_data, draft, REGION_OS)
+        account_name = display_account_name(account)
+        if draft:
+            self.log(f"账号 {account_name} 国际服 cookie 已录入，等待保存", "auth")
+        else:
+            self.log(f"账号 {account_name} 国际服 cookie 已保存", "auth")
+        message = f"账号 {account_name} 登录成功" + ("，请保存账号" if draft else "")
+        if status == "unknown":
+            # 网络抖动不该挡住保存，但要让用户知道这次没验成
+            message += "（暂时无法在线校验，签到时会再确认）"
+        return {
+            "account_index": account_index,
+            "draft": draft,
+            "message": message,
+            "account_data": account_data,
+        }
 
     def _complete_login_data(self, login: QRLogin | CaptchaLogin, token_data: dict[str, str]) -> dict[str, str]:
         account_data = {**token_data, **login.get_additional_tokens(token_data["stoken"], token_data["mid"])}
@@ -693,10 +741,13 @@ class WebApp:
         account_snapshot: dict[str, Any],
         account_data: dict[str, str],
         draft: bool,
+        region: str = REGION_CN,
     ) -> dict[str, Any]:
         with self.lock:
             new_uid = str(account_data.get("stuid") or "").strip()
-            duplicate = find_duplicate_uid(self.config.get("accounts") or [], new_uid, None if draft else account_index)
+            duplicate = find_duplicate_uid(
+                self.config.get("accounts") or [], new_uid, None if draft else account_index, region
+            )
             if duplicate is not None:
                 raise ValueError(f"UID {new_uid} 已存在，不能重复添加同一账号")
             account = {**account_snapshot, **account_data}
@@ -952,6 +1003,29 @@ def display_account_name(account: dict[str, Any]) -> str:
     return str(account.get("name") or account.get("stuid") or "未命名账号")
 
 
+def parse_avatar_key(value: str) -> str:
+    """把页面传来的头像键规整成 uid（国服）或 os:uid（国际服），不合法返回空串。"""
+    text = str(value or "").strip()
+    region, sep, uid = text.partition(":")
+    if not sep:
+        region, uid = REGION_CN, text
+    if region not in (REGION_CN, REGION_OS):
+        return ""
+    uid = uid.strip()
+    if not (uid.isascii() and uid.isdigit() and len(uid) <= 20):
+        return ""
+    return f"{REGION_OS}:{uid}" if region == REGION_OS else uid
+
+
+def ensure_login_region(account: dict[str, Any], region: str) -> None:
+    """服务器类型一旦确定就不能换：国服的登录凭证写不进国际服账号，反过来也一样。"""
+    if account_region(account) == region:
+        return
+    if region == REGION_CN:
+        raise ValueError("该账号是国际服账号，请用 HoYoLAB cookie 登录")
+    raise ValueError("该账号是国服账号，请用扫码或验证码登录")
+
+
 def normalize_cn_phone(phone: str) -> str:
     digits = "".join(char for char in str(phone or "") if char.isdigit())
     if len(digits) != 11:
@@ -959,13 +1033,15 @@ def normalize_cn_phone(phone: str) -> str:
     return digits
 
 
-def find_duplicate_uid(accounts: list[dict[str, Any]], uid: str, exclude_index: int | None = None) -> int | None:
+def find_duplicate_uid(
+    accounts: list[dict[str, Any]], uid: str, exclude_index: int | None = None, region: str = REGION_CN
+) -> int | None:
     if not uid:
         return None
     for index, account in enumerate(accounts):
         if exclude_index is not None and index == exclude_index:
             continue
-        if str(account.get("stuid") or "").strip() == uid:
+        if account_region(account) == region and str(account.get("stuid") or "").strip() == uid:
             return index
     return None
 
@@ -1269,6 +1345,19 @@ class Handler(BaseHTTPRequestHandler):
                     account_payload,
                     bool(payload.get("draft")),
                     str(payload.get("aigis") or ""),
+                )
+                self.send_json({"ok": True, **result})
+                return
+            if path == "/api/login/cookie":
+                account_index = int(payload.get("account_index", -1))
+                account_payload = payload.get("account")
+                if account_payload is not None and not isinstance(account_payload, dict):
+                    raise ValueError("账号数据必须是 JSON 对象")
+                result = self.app.complete_login_cookie(
+                    account_index,
+                    str(payload.get("cookie") or ""),
+                    account_payload,
+                    bool(payload.get("draft")),
                 )
                 self.send_json({"ok": True, **result})
                 return
