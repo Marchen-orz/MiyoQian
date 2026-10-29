@@ -674,6 +674,26 @@ test("avatar addresses are looked up once per account and swapped in without a r
   }
 });
 
+test("overseas accounts are looked up under their own key", async () => {
+  const requests = [];
+  const fetch = async (url) => {
+    requests.push(url);
+    return { ok: true, json: async () => ({ avatars: {} }) };
+  };
+  resetAvatars();
+  vm.runInContext(
+    `config = { accounts: [{ stuid: "12" }, { stuid: "12", region: "os" }, { stuid: "" }] };`,
+    ui,
+  );
+  try {
+    await withGlobalsAsync({ fetch }, () => ui.loadAccountAvatars());
+    assert.deepEqual(requests, ["/api/account/avatars?uids=12,os:12"]);
+  } finally {
+    vm.runInContext("config = null;", ui);
+    resetAvatars();
+  }
+});
+
 test("a failed avatar request is silent and is not retried on every redraw", async () => {
   let calls = 0;
   const fetch = async () => {

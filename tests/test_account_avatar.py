@@ -6,10 +6,11 @@ from unittest.mock import MagicMock, patch
 
 from miyouqian import constants as c
 from miyouqian.core.http import ApiError
-from miyouqian.core.profile import fetch_avatar_url, safe_avatar_url
+from miyouqian.core.profile import fetch_avatar_url, fetch_os_avatar_url, safe_avatar_url
 from miyouqian.service import web
 
 GOOD = "https://bbs-static.miyoushe.com/avatar/avatar10013.png"
+HOYOLAB_GOOD = "https://upload-os-bbs.hoyolab.com/upload/2023/11/22/a.png?x-oss-process=image%2Fformat%2Cwebp"
 
 
 class FakeClient:
@@ -29,6 +30,7 @@ class SafeAvatarUrlTest(unittest.TestCase):
             safe_avatar_url("https://img-static.mihoyo.com/communityweb/avatar/avatar10013.png"),
             "https://img-static.mihoyo.com/communityweb/avatar/avatar10013.png",
         )
+        self.assertEqual(safe_avatar_url(HOYOLAB_GOOD), HOYOLAB_GOOD)
 
     def test_anything_else_is_dropped(self):
         for url in (
@@ -38,6 +40,7 @@ class SafeAvatarUrlTest(unittest.TestCase):
             "https://evil.example.com/a.png",
             "https://evilmiyoushe.com/a.png",
             "https://miyoushe.com.evil.example.com/a.png",
+            "https://hoyolab.com.evil.example.com/a.png",
             "https://example.com/?x=.miyoushe.com",
             "//bbs-static.miyoushe.com/a.png",
             "javascript:alert(1)",
@@ -67,6 +70,22 @@ class FetchAvatarUrlTest(unittest.TestCase):
         self.assertEqual(fetch_avatar_url(FakeClient(untrusted), "1"), "")
 
 
+class FetchOsAvatarUrlTest(unittest.TestCase):
+    def test_asks_the_hoyolab_profile_api_by_uid(self):
+        client = FakeClient({"retcode": 0, "data": {"user_info": {"avatar_url": HOYOLAB_GOOD}}})
+
+        self.assertEqual(fetch_os_avatar_url(client, "2002"), HOYOLAB_GOOD)
+        url, kwargs = client.calls[0]
+        self.assertEqual(url, c.OS_USER_INFO_URL)
+        self.assertEqual(kwargs["params"]["uid"], "2002")
+        # 公开接口，不能把账号的 cookie 带出去
+        self.assertFalse({"cookie", "Cookie", "DS"} & set(kwargs["headers"]))
+
+    def test_api_error_is_raised_like_the_cn_one(self):
+        with self.assertRaises(ApiError):
+            fetch_os_avatar_url(FakeClient({"retcode": -1, "message": "x"}), "1")
+
+
 class WebAppAccountAvatarsTest(unittest.TestCase):
     def setUp(self):
         self.logged = []
@@ -79,15 +98,18 @@ class WebAppAccountAvatarsTest(unittest.TestCase):
         patches = [
             patch.object(web, "ApiClient", MagicMock()),
             patch.object(web, "fetch_avatar_url"),
+            patch.object(web, "fetch_os_avatar_url"),
             patch.object(web, "time"),
         ]
         self.fetch = patches[1].start()
-        self.time = patches[2].start()
+        self.fetch_os = patches[2].start()
+        self.time = patches[3].start()
         patches[0].start()
         for item in patches:
             self.addCleanup(item.stop)
         self.time.monotonic.return_value = 1000.0
         self.fetch.side_effect = lambda client, uid: f"https://bbs-static.miyoushe.com/avatar/{uid}.png"
+        self.fetch_os.side_effect = lambda client, uid: f"https://upload-os-bbs.hoyolab.com/avatar/{uid}.png"
 
     def fetched(self):
         # 并发查询，调用顺序不固定
@@ -147,6 +169,40 @@ class WebAppAccountAvatarsTest(unittest.TestCase):
     def test_an_account_without_an_avatar_is_left_out(self):
         self.fetch.side_effect = lambda client, uid: ""
         self.assertEqual(self.app.account_avatars(["12"]), {"avatars": {}})
+
+    def test_overseas_keys_use_the_hoyolab_profile_api(self):
+        result = self.app.account_avatars(["os:12", "34"])
+
+        self.assertEqual(["12"], [call.args[1] for call in self.fetch_os.call_args_list])
+        self.assertEqual(["34"], self.fetched())
+        self.assertEqual(
+            {
+                "os:12": "https://upload-os-bbs.hoyolab.com/avatar/12.png",
+                "34": "https://bbs-static.miyoushe.com/avatar/34.png",
+            },
+            result["avatars"],
+        )
+
+    def test_the_same_uid_on_both_servers_gets_two_avatars(self):
+        result = self.app.account_avatars(["12", "os:12"])
+
+        self.assertEqual(
+            {
+                "12": "https://bbs-static.miyoushe.com/avatar/12.png",
+                "os:12": "https://upload-os-bbs.hoyolab.com/avatar/12.png",
+            },
+            result["avatars"],
+        )
+
+    def test_a_failing_overseas_lookup_does_not_disturb_the_cn_one(self):
+        self.fetch_os.side_effect = ApiError("boom")
+        self.assertEqual(self.app.account_avatars(["12", "os:12"]), {"avatars": {"12": "https://bbs-static.miyoushe.com/avatar/12.png"}})
+
+    def test_avatar_keys_are_normalized(self):
+        self.assertEqual("12", web.parse_avatar_key(" 12 "))
+        self.assertEqual("os:12", web.parse_avatar_key("os:12"))
+        for key in ("os:", "os:abc", "xx:12", ":12", "os:" + "9" * 30, ""):
+            self.assertEqual("", web.parse_avatar_key(key), key)
 
 
 if __name__ == "__main__":
