@@ -20,6 +20,7 @@ from .core.config import (
 )
 from .core.http import ApiClient
 from .core.logs import append_log, configure_logger, format_line
+from .core.region import REGION_OS, account_region
 from .service.notifier import send_task_push
 from .service.runner import run_tasks
 
@@ -153,7 +154,10 @@ def command_serve(config_path: pathlib.Path, host: str | None, port: int | None)
 
 def command_show(config_path: pathlib.Path) -> int:
     config = load_config(config_path)
-    accounts = ", ".join(str(item.get("name", "未命名")) for item in config.get("accounts", []))
+    accounts = ", ".join(
+        str(item.get("name", "未命名")) + ("(国际服)" if account_region(item) == REGION_OS else "")
+        for item in config.get("accounts", [])
+    )
     games = ", ".join(config.get("games", {}).get("enabled", []))
     cloud_games = ", ".join(config.get("cloud_games", {}).get("enabled", []))
     enabled_cloud_games = set(config.get("cloud_games", {}).get("enabled", []))

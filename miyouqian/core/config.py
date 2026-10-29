@@ -11,6 +11,8 @@ from typing import Any
 import yaml
 
 from . import crypto
+from .cookies import guess_uid
+from .region import REGION_CN, REGION_OS, account_region, normalize_region
 
 SENSITIVE_ACCOUNT_FIELDS = ("cookie", "stuid", "stoken", "mid")
 SUPPORTED_CLOUD_GAME_KEYS = ("genshin", "zzz")
@@ -146,8 +148,12 @@ def normalize_config(config: dict[str, Any]) -> None:
         config["accounts"] = [accounts]
     for index, account in enumerate(config["accounts"], start=1):
         account["name"] = str(account.get("name") or "")[:10]
+        account["region"] = normalize_region(account.get("region"))
         for field in SENSITIVE_ACCOUNT_FIELDS:
             account.setdefault(field, "")
+        if account["region"] == REGION_OS and not account["stuid"] and account.get("cookie"):
+            # 国际服只有 cookie 一项凭证，UID 直接从里面取，手改凭证文件时也不用另填
+            account["stuid"] = guess_uid(str(account["cookie"]))
     device = config.setdefault("device", {})
     first_cookie = str(config["accounts"][0].get("cookie", "")) if config["accounts"] else ""
     presets = device.setdefault("presets", copy.deepcopy(DEFAULT_DEVICE_PRESETS))
@@ -454,22 +460,25 @@ def parse_int(value: Any, default: int = 0) -> int:
 
 
 def validate_unique_account_uids(config: dict[str, Any]) -> None:
-    seen: dict[str, int] = {}
+    # 国服和国际服是两套账号体系，UID 只在同一服务器内要求唯一
+    seen: dict[tuple[str, str], int] = {}
     for index, account in enumerate(config.get("accounts", []), start=1):
         uid = str(account.get("stuid") or "").strip()
         if not uid:
             continue
-        if uid in seen:
-            raise ValueError(f"UID {uid} 已存在于账号 {seen[uid]}，不能重复添加同一账号")
-        seen[uid] = index
+        key = (account_region(account), uid)
+        if key in seen:
+            raise ValueError(f"UID {uid} 已存在于账号 {seen[key]}，不能重复添加同一账号")
+        seen[key] = index
 
 
 def find_account_index_by_stuid(accounts: list[dict[str, Any]], stuid: str) -> int | None:
+    """按 stuid 找国服账号的下标。商店兑换是国服功能，国际服账号不参与。"""
     stuid = str(stuid or "").strip()
     if not stuid:
         return None
     for index, account in enumerate(accounts):
-        if str(account.get("stuid") or "").strip() == stuid:
+        if account_region(account) == REGION_CN and str(account.get("stuid") or "").strip() == stuid:
             return index
     return None
 
@@ -491,7 +500,7 @@ def bind_shop_plan_accounts(config: dict[str, Any]) -> None:
         stuid = str(plan.get("account_stuid") or "").strip()
         if not stuid:
             index = plan.get("account_index", 0)
-            if isinstance(index, int) and 0 <= index < len(accounts):
+            if isinstance(index, int) and 0 <= index < len(accounts) and account_region(accounts[index]) == REGION_CN:
                 plan["account_stuid"] = str(accounts[index].get("stuid") or "").strip()
             continue
         index = find_account_index_by_stuid(accounts, stuid)
@@ -517,9 +526,14 @@ def find_account(config: dict[str, Any], name: str | None = None) -> dict[str, A
 def upsert_account(config: dict[str, Any], name: str, data: dict[str, Any]) -> dict[str, Any]:
     accounts = config.setdefault("accounts", [])
     new_uid = str(data.get("stuid") or "").strip()
+    new_region = normalize_region(data.get("region"))
     if new_uid:
         for account in accounts:
-            if account.get("name") != name and str(account.get("stuid") or "").strip() == new_uid:
+            if (
+                account.get("name") != name
+                and account_region(account) == new_region
+                and str(account.get("stuid") or "").strip() == new_uid
+            ):
                 raise ValueError(f"UID {new_uid} 已存在，不能重复添加同一账号")
     for account in accounts:
         if account.get("name") == name:

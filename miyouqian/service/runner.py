@@ -7,6 +7,8 @@ from typing import Any, Callable
 
 from ..core.config import find_account, save_config
 from ..core.http import ApiClient
+from ..core.region import REGION_CN, REGION_OS, account_region
+from ..overseas.checkin import HoyolabCheckin
 from ..tasks.bbs import BbsTasks
 from ..tasks.cloud_games import CloudGameCheckin
 from ..tasks.games import GameCheckin
@@ -54,44 +56,77 @@ def run_tasks(
         add("没有配置账号，已跳过。")
         return output
     should_emit = bool(emit or emit_component)
+    features = config.get("features", {})
+
+    def run_cn_account(client: ApiClient, account: dict[str, Any]) -> None:
+        if not bbs_only and features.get("game_checkin", True):
+            run_stage(
+                "游戏社区签到",
+                "game",
+                "游戏社区失败项：",
+                lambda: GameCheckin(
+                    client,
+                    config,
+                    account,
+                    emit=(lambda message: add(message, "game")) if should_emit else None,
+                ).run(only_games=only_games),
+            )
+        if not bbs_only and features.get("cloud_game_checkin", False):
+            run_stage(
+                "云游戏签到",
+                "cloud",
+                "云游戏失败项：",
+                lambda: CloudGameCheckin(
+                    client,
+                    config,
+                    account,
+                    emit=(lambda message: add(message, "cloud")) if should_emit else None,
+                ).run(),
+            )
+        if not games_only and features.get("bbs_tasks", False):
+            run_stage(
+                "米游币任务",
+                "bbs",
+                "米游币失败项：",
+                lambda: BbsTasks(
+                    client,
+                    config,
+                    account,
+                    emit=(lambda message: add(message, "bbs")) if should_emit else None,
+                ).run(),
+            )
+
+    def run_os_account(client: ApiClient, account: dict[str, Any]) -> None:
+        if not bbs_only and features.get("game_checkin", True):
+            run_stage(
+                "游戏社区签到",
+                "game",
+                "游戏社区失败项：",
+                lambda: HoyolabCheckin(
+                    client,
+                    config,
+                    account,
+                    emit=(lambda message: add(message, "game")) if should_emit else None,
+                ).run(only_games=only_games),
+            )
+        unsupported = [
+            label
+            for label, wanted in (
+                ("云游戏签到", not bbs_only and features.get("cloud_game_checkin", False)),
+                ("米游币任务", not games_only and features.get("bbs_tasks", False)),
+            )
+            if wanted
+        ]
+        if unsupported:
+            add(f"国际服账号暂不支持{'、'.join(unsupported)}，已跳过")
+
+    # 国服 / 国际服共用一份账号列表和配置，只在这里按账号的 region 分发到各自的实现
+    runners = {REGION_CN: run_cn_account, REGION_OS: run_os_account}
     with ApiClient() as client:
         for index, account in enumerate(accounts, start=1):
-            add(f"# 账号 {index}/{len(accounts)}: {account.get('name', '未命名')}")
-            if not bbs_only and config.get("features", {}).get("game_checkin", True):
-                run_stage(
-                    "游戏社区签到",
-                    "game",
-                    "游戏社区失败项：",
-                    lambda: GameCheckin(
-                        client,
-                        config,
-                        account,
-                        emit=(lambda message: add(message, "game")) if should_emit else None,
-                    ).run(only_games=only_games),
-                )
-            if not bbs_only and config.get("features", {}).get("cloud_game_checkin", False):
-                run_stage(
-                    "云游戏签到",
-                    "cloud",
-                    "云游戏失败项：",
-                    lambda: CloudGameCheckin(
-                        client,
-                        config,
-                        account,
-                        emit=(lambda message: add(message, "cloud")) if should_emit else None,
-                    ).run(),
-                )
-            if not games_only and config.get("features", {}).get("bbs_tasks", False):
-                run_stage(
-                    "米游币任务",
-                    "bbs",
-                    "米游币失败项：",
-                    lambda: BbsTasks(
-                        client,
-                        config,
-                        account,
-                        emit=(lambda message: add(message, "bbs")) if should_emit else None,
-                    ).run(),
-                )
+            region = account_region(account)
+            suffix = "（国际服）" if region == REGION_OS else ""
+            add(f"# 账号 {index}/{len(accounts)}: {account.get('name', '未命名')}{suffix}")
+            runners[region](client, account)
     save_config(config_path, config)
     return output

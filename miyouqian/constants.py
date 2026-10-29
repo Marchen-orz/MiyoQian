@@ -148,6 +148,54 @@ CLOUD_GAMES = {
     },
 }
 
+# 国际服（HoYoLAB）签到：按 HoYoLAB 账号计算，只靠 cookie 鉴权，不需要 DS 和设备头。
+# 接口来自 genshin.py，尚未用真实账号验证。
+OS_HK4E_API = "https://sg-hk4e-api.hoyolab.com"
+OS_PUBLIC_API = "https://sg-public-api.hoyolab.com"
+OS_BBS_API = "https://bbs-api-os.hoyolab.com"
+OS_USER_INFO_URL = f"{OS_BBS_API}/community/user/wapi/getUserFullInfo"
+OS_ACT_ORIGIN = "https://act.hoyolab.com"
+OS_LANG = "zh-cn"
+OS_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+)
+
+# key 与 GAMES 保持一致，这样共用的 games.enabled 可以直接用；国际服没有的游戏（如崩坏学园2）不在这里。
+# base_url 下依次是 info / home / sign 三个子路径，signgame 对应请求头 x-rpc-signgame。
+OS_GAMES = {
+    "genshin": {
+        "name": "原神",
+        "act_id": "e202102251931481",
+        "base_url": f"{OS_HK4E_API}/event/sol",
+        "signgame": "hk4e",
+    },
+    "starrail": {
+        "name": "崩坏：星穹铁道",
+        "act_id": "e202303301540311",
+        "base_url": f"{OS_PUBLIC_API}/event/luna/hkrpg/os",
+        "signgame": "hkrpg",
+    },
+    "zzz": {
+        "name": "绝区零",
+        "act_id": "e202406031448091",
+        "base_url": f"{OS_PUBLIC_API}/event/luna/zzz/os",
+        "signgame": "zzz",
+    },
+    "honkai3rd": {
+        "name": "崩坏3",
+        "act_id": "e202110291205111",
+        "base_url": f"{OS_PUBLIC_API}/event/mani",
+        "signgame": "bh3",
+    },
+    "tears": {
+        "name": "未定事件簿",
+        "act_id": "e202202281857121",
+        "base_url": f"{OS_PUBLIC_API}/event/luna/nxx/os",
+        "signgame": "nxx",
+    },
+}
+
 CLOUD_GAME_DISABLED_REASONS = {
     "starrail": "云星穹铁道是版本更新赠送 600 分钟，不需要每日签到获取时长",
 }
