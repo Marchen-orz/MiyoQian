@@ -742,6 +742,7 @@ function renderTaskModalBody() {
       <div class="task-group" id="gameTaskGroup">
         <div class="choice-toggles cols-3" id="gameChips"></div>
       </div>
+      <p class="task-note">国服和国际服账号共用这份游戏列表；国际服没有的游戏（如崩坏学园2）会自动跳过。</p>
     `;
     renderGames();
     return;
@@ -755,6 +756,7 @@ function renderTaskModalBody() {
       <div class="task-group" id="cloudGameTaskGroup">
         <div class="choice-toggles cols-3" id="cloudGameChips"></div>
       </div>
+      <p class="task-note">仅对国服账号生效，国际服账号会自动跳过。</p>
     `;
     renderCloudGames();
     return;
@@ -776,6 +778,7 @@ function renderTaskModalBody() {
       </div>
       <div class="choice-toggles cols-3" id="bbsForumChips"></div>
     </div>
+    <p class="task-note">仅对国服账号生效，国际服账号会自动跳过。</p>
   `;
   renderBbsForums();
 }
@@ -1527,7 +1530,7 @@ function renderAccounts() {
     : `<div class="acc-empty">
         <svg><use href="#i-user"></use></svg>
         <strong>还没有账号</strong>
-        <span>添加后可以选择扫码或验证码登录</span>
+        <span>国服可扫码或验证码登录，国际服粘贴 HoYoLAB cookie</span>
         <button class="primary" type="button" data-add-account>
           <svg><use href="#i-plus"></use></svg>
           <span>添加账号</span>
@@ -1544,6 +1547,13 @@ function renderAccounts() {
       showLoginMethods(Number(button.dataset.login)).catch((error) =>
         showToast(error.message),
       );
+    });
+  });
+  document.querySelectorAll("[data-region-select]").forEach((select) => {
+    // 换服务器会改变这张卡片上的按钮和提示，先把已填的内容收回来再重画
+    select.addEventListener("change", () => {
+      collectConfig();
+      renderAccounts();
     });
   });
   document.querySelectorAll("[data-edit-account]").forEach((button) => {
@@ -1651,12 +1661,13 @@ function bindAvatarFallback(img) {
 // 头像只是装饰：取不到就一直用默认头像，不提示、不重试
 async function loadAccountAvatars() {
   try {
-    const uids = (config?.accounts || [])
-      .map((account) => String(account.stuid || ""))
-      .filter((uid) => /^\d+$/.test(uid) && !(uid in accountAvatars) && !avatarRequested.has(uid));
-    if (!uids.length) return;
-    uids.forEach((uid) => avatarRequested.add(uid));
-    const data = await api(`/api/account/avatars?uids=${uids.join(",")}`);
+    const keys = (config?.accounts || [])
+      .filter((account) => account.stuid)
+      .map(avatarKey)
+      .filter((key) => /^(?:\d+|os:\d+)$/.test(key) && !(key in accountAvatars) && !avatarRequested.has(key));
+    if (!keys.length) return;
+    keys.forEach((key) => avatarRequested.add(key));
+    const data = await api(`/api/account/avatars?uids=${keys.join(",")}`);
     Object.assign(accountAvatars, data.avatars || {});
     applyAccountAvatars();
   } catch {
@@ -1667,11 +1678,11 @@ async function loadAccountAvatars() {
 // 异步取回头像后就地换图，不重绘账号列表，免得打断正在进行的编辑或登录
 function applyAccountAvatars() {
   (config.accounts || []).forEach((account, index) => {
-    const uid = String(account.stuid || "");
-    const url = accountAvatars[uid];
+    const key = avatarKey(account);
+    const url = accountAvatars[key];
     const img = document.querySelector(`.account-row[data-index="${index}"] .acc-avatar`);
     if (!url || !img || img.classList.contains("is-remote")) return;
-    img.dataset.avatarUid = uid;
+    img.dataset.avatarUid = key;
     img.classList.add("is-remote");
     img.src = url;
     bindAvatarFallback(img);
@@ -1690,22 +1701,82 @@ function getFilteredGoods() {
   return shopGoods;
 }
 
+// 国服 / 国际服共用同一份账号列表，账号上的 region 只决定登录方式和哪些功能适用
+function isOverseas(account) {
+  return account?.region === "os";
+}
+
+// 两边的 UID 可能撞号，头像缓存按服务器分开存
+function avatarKey(account) {
+  const uid = String(account?.stuid || "");
+  return isOverseas(account) ? `os:${uid}` : uid;
+}
+
+// 登录成功后清掉这张卡片记住的头像，随后的重绘会重新取一次
+// （换了账号、上次没取到、或者之前根本没登录）
+function forgetAccountAvatar(account) {
+  const key = avatarKey(account);
+  if (!key) return;
+  delete accountAvatars[key];
+  avatarRequested.delete(key);
+}
+
+// 服务器只能在还没登录时选；登录之后凭证属于哪一边就固定了
+function accountRegionControl(account, index, editing, loggedIn) {
+  const overseas = isOverseas(account);
+  if (!editing || loggedIn) {
+    return `<input data-field="region" type="hidden" value="${overseas ? "os" : "cn"}" />`;
+  }
+  return `
+    <label class="acc-region">
+      <span>服务器</span>
+      <div class="select-wrapper">
+        <select data-field="region" data-region-select="${index}">
+          <option value="cn" ${overseas ? "" : "selected"}>国服（米游社）</option>
+          <option value="os" ${overseas ? "selected" : ""}>国际服（HoYoLAB）</option>
+        </select>
+        <svg class="select-arrow" width="12" height="8" aria-hidden="true"><use href="#arrow-down"/></svg>
+      </div>
+    </label>
+  `;
+}
+
 function accountCard(account, index) {
   const editing = editingAccountIndex === index;
   const loggedIn = Boolean(account.stuid);
-  const avatarUrl = loggedIn ? accountAvatars[String(account.stuid)] || "" : "";
-  const cloudCount = accountCloudCount(account);
-  const cloudOpen = expandedCloudAccounts.has(index);
+  const overseas = isOverseas(account);
+  // 头像走各自服务器的公开资料接口，国际服取 HoYoLAB 的头像
+  const avatarUrl = loggedIn ? accountAvatars[avatarKey(account)] || "" : "";
+  const cloudCount = overseas ? 0 : accountCloudCount(account);
+  const cloudOpen = !overseas && expandedCloudAccounts.has(index);
+  const regionControl = accountRegionControl(account, index, editing, loggedIn);
   const nameField = editing
     ? `<input class="acc-edit-input" data-field="name" type="text" maxlength="10" placeholder="最多 10 字" value="${escapeAttr(account.name || "")}" />`
     : `<span class="acc-name-text">${escapeHtml(accountLabel(account))}</span>
        <input data-field="name" type="hidden" value="${escapeAttr(account.name || "")}" />`;
-  const meta = loggedIn
-    ? `<span class="acc-uid">UID ${escapeHtml(account.stuid)}</span>
-       <span class="acc-chip ${cloudCount ? "on" : ""}">
+  const cloudChip = overseas
+    ? ""
+    : `<span class="acc-chip ${cloudCount ? "on" : ""}">
          <svg><use href="#i-cloud"></use></svg>${cloudCount ? `云游戏 ${cloudCount}/2` : "云游戏未配置"}
-       </span>`
-    : `<span>还没有登录，点「登录方式」扫码或验证码登录</span>`;
+       </span>`;
+  const loginHint = overseas
+    ? "点「粘贴 Cookie」填入 HoYoLAB 的 cookie"
+    : "点「登录方式」扫码或验证码登录";
+  // 编辑态还没有登录按钮，只留名字长度提示；登录引导等保存后再出现
+  const meta = loggedIn
+    ? `<span class="acc-uid">UID ${escapeHtml(account.stuid)}</span>${cloudChip}`
+    : editing
+      ? ""
+      : `<span>还没有登录，${loginHint}</span>`;
+  const loginLabel = overseas
+    ? loggedIn ? "更新 Cookie" : "粘贴 Cookie"
+    : loggedIn ? "刷新登录" : "登录方式";
+  const cloudButton = overseas
+    ? ""
+    : `<button class="ghost ${cloudOpen || cloudCount ? "is-active" : ""}" type="button" data-toggle-cloud="${index}" title="云游戏签到凭证">
+         <svg><use href="#i-cloud"></use></svg>
+         <span>云游戏凭证</span>
+       </button>`;
   const actions = editing
     ? `<span class="spacer"></span>
        <button class="ghost" type="button" data-cancel-account="${index}">
@@ -1717,13 +1788,10 @@ function accountCard(account, index) {
          <span>保存</span>
        </button>`
     : `<button class="${loggedIn ? "ghost" : "primary"}" type="button" data-login="${index}">
-         <svg><use href="#i-phone"></use></svg>
-         <span>${loggedIn ? "刷新登录" : "登录方式"}</span>
+         <svg><use href="#${overseas ? "i-edit" : "i-phone"}"></use></svg>
+         <span>${loginLabel}</span>
        </button>
-       <button class="ghost ${cloudOpen || cloudCount ? "is-active" : ""}" type="button" data-toggle-cloud="${index}" title="云游戏签到凭证">
-         <svg><use href="#i-cloud"></use></svg>
-         <span>云游戏凭证</span>
-       </button>
+       ${cloudButton}
        <span class="spacer"></span>
        <button class="ghost icon-only" type="button" data-edit-account="${index}" title="编辑账号名">
          <svg><use href="#i-edit"></use></svg>
@@ -1735,23 +1803,26 @@ function accountCard(account, index) {
   return `
     <article class="account-row acc-card ${editing ? "is-editing" : ""}" data-index="${index}" data-draft="${account._draft ? "1" : "0"}">
       <div class="acc-head">
-        <img class="acc-avatar${loggedIn ? "" : " is-empty"}${avatarUrl ? " is-remote" : ""}" src="${escapeAttr(avatarUrl || DEFAULT_AVATAR)}" ${avatarUrl ? `data-avatar-uid="${escapeAttr(account.stuid)}" ` : ""}referrerpolicy="no-referrer" alt="" width="44" height="44" />
+        <img class="acc-avatar${loggedIn ? "" : " is-empty"}${avatarUrl ? " is-remote" : ""}" src="${escapeAttr(avatarUrl || DEFAULT_AVATAR)}" ${avatarUrl ? `data-avatar-uid="${escapeAttr(avatarKey(account))}" ` : ""}referrerpolicy="no-referrer" alt="" width="44" height="44" />
         <div class="acc-body">
           <div class="acc-name">
             ${nameField}
             <span class="acc-pill ${loggedIn ? "ok" : "off"}">${loggedIn ? "已登录" : "未登录"}</span>
+            ${overseas ? `<span class="acc-pill os">国际服</span>` : ""}
             ${account._draft ? `<span class="acc-pill draft">未保存</span>` : ""}
           </div>
-          <div class="acc-meta">${meta}</div>
+          ${meta ? `<div class="acc-meta">${meta}</div>` : ""}
           ${editing ? `<div class="acc-hint">最多 10 个字，仅用于本地显示</div>` : ""}
+          ${editing && !loggedIn ? regionControl : ""}
         </div>
       </div>
       <div class="acc-actions">${actions}</div>
+      ${editing && !loggedIn ? "" : regionControl}
       <input data-field="stuid" type="hidden" value="${escapeAttr(account.stuid || "")}" />
       <input data-field="stoken" type="hidden" value="${escapeAttr(account.stoken || "")}" />
       <input data-field="mid" type="hidden" value="${escapeAttr(account.mid || "")}" />
       <textarea class="hidden-field" data-field="cookie">${escapeHtml(account.cookie || "")}</textarea>
-      ${accountCloudGameFields(account, index)}
+      ${overseas ? accountCloudGameHiddenFields(account.cloud_games?.tokens || {}) : accountCloudGameFields(account, index)}
       <div class="account-login-slot" data-login-slot="${index}"></div>
     </article>
   `;
@@ -2167,16 +2238,16 @@ function shopPlanRow(plan, index) {
       selectedAccount < 0
           ? `<option value="" data-stuid="${escapeAttr(plan.account_stuid || "")}" selected>账号已删除，请重新选择</option>`
           : "";
+  // 国际服账号不能做兑换账号；下标仍是它在完整账号列表里的位置，所以只跳过不重排
   const accountOptions =
-      accounts.length || missingOption
-          ? missingOption +
+      missingOption +
           accounts
               .map((account, accountIndex) => {
+                if (isOverseas(account)) return "";
                 const selected = accountIndex === selectedAccount ? "selected" : "";
                 return `<option value="${accountIndex}" data-stuid="${escapeAttr(account.stuid || "")}" ${selected}>${escapeHtml(accountLabel(account))}</option>`;
               })
-              .join("")
-          : `<option value="0">暂无账号</option>`;
+              .join("") || `<option value="0">暂无账号</option>`;
   return `
     <details class="shop-plan ${paused ? "is-paused" : ""}" data-shop-plan="${index}" ${open}>
       <summary class="shop-plan-summary">
@@ -2652,16 +2723,17 @@ function canShopGoodExchangeNow(good) {
   return good?.display_status === "online" || good?.display_status === "always";
 }
 
+// 商店兑换是国服功能，国际服账号不在可选范围里
 function loggedInAccountChoices() {
   return (config.accounts || [])
     .map((account, index) => ({ account, index }))
-    .filter(({ account }) => account?.stuid && account?.cookie);
+    .filter(({ account }) => account?.stuid && account?.cookie && !isOverseas(account));
 }
 
 function chooseShopExchangeAccount(good) {
   const choices = loggedInAccountChoices();
   if (!choices.length) {
-    throw new Error("请先添加并登录账号");
+    throw new Error("请先添加并登录国服账号（商店兑换不支持国际服）");
   }
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
@@ -2728,7 +2800,7 @@ function chooseShopExchangeAccount(good) {
 function chooseShopPlanAccount(good) {
   const choices = loggedInAccountChoices();
   if (!choices.length) {
-    throw new Error("请先添加并登录账号");
+    throw new Error("请先添加并登录国服账号（商店兑换不支持国际服）");
   }
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
@@ -2921,14 +2993,16 @@ function serverConfig({ includeDrafts = true } = {}) {
 }
 
 function validateUniqueAccountUids(accounts) {
+  // 国服和国际服是两套账号体系，UID 只在同一服务器内要求唯一
   const seen = new Map();
   accounts.forEach((account, index) => {
     const uid = String(account.stuid || "").trim();
     if (!uid) return;
-    if (seen.has(uid)) {
+    const key = `${isOverseas(account) ? "os" : "cn"}:${uid}`;
+    if (seen.has(key)) {
       throw new Error(`UID ${uid} 已存在，不能重复添加同一账号`);
     }
-    seen.set(uid, index);
+    seen.set(key, index);
   });
 }
 
@@ -3037,6 +3111,12 @@ async function refreshStatus() {
     clearLoginCountdown();
     localLoginPanel = null;
     showToast(login.message || "登录成功");
+    // 扫码登录也走同一条路：先让这张卡片的头像失效，重绘时重新取
+    const loginIndex = login.account_index ?? activeLoginIndex;
+    forgetAccountAvatar({
+      stuid: login.account_data?.stuid || accounts[loginIndex]?.stuid,
+      region: login.account_data?.region || accounts[loginIndex]?.region,
+    });
     if (login.draft) {
       applyDraftLogin(login);
       activeLoginIndex = null;
@@ -3157,6 +3237,10 @@ function renderLocalLoginPanel(slot, panel) {
       ?.addEventListener("click", resetLoginPanel);
     return;
   }
+  if (panel.mode === "cookie") {
+    renderCookieLoginPanel(slot, panel);
+    return;
+  }
 
   const busy = Boolean(panel.sending || panel.verifying);
   const countdown = Number(panel.countdown || 0);
@@ -3231,6 +3315,154 @@ function renderLocalLoginPanel(slot, panel) {
     ?.addEventListener("click", resetLoginPanel);
 }
 
+// 国际服（HoYoLAB）没有扫码 / 验证码登录，凭证是用户从浏览器里复制的 cookie
+function renderCookieLoginPanel(slot, panel) {
+  const busy = Boolean(panel.verifying);
+  const message = panel.message
+    ? `<p class="login-panel-message ${panel.error ? "error" : ""}" data-login-panel-message>${escapeHtml(panel.message)}</p>`
+    : "";
+  slot.innerHTML = `
+    <div class="inline-login captcha-login-panel cookie-login-panel">
+      <div class="captcha-login-fields">
+        <textarea data-login-cookie="${panel.account_index}" rows="3" spellcheck="false" autocomplete="off" placeholder="ltuid_v2=…; ltoken_v2=…" ${busy ? "disabled" : ""}>${escapeHtml(panel.cookie || "")}</textarea>
+        <p class="login-panel-hint">在浏览器里登录 hoyolab.com，按 F12 打开开发者工具，到「应用（Application）→ Cookie」里找到 ltuid_v2 和 ltoken_v2，连同行头一起复制也可以；复制后点「从剪贴板粘贴」，或直接在输入框里按 Ctrl+V。</p>
+        <p class="login-panel-detect" data-login-detect></p>
+      </div>
+      <div class="captcha-login-actions">
+        <button class="primary" type="button" data-login-submit-cookie="${panel.account_index}" ${busy ? "disabled" : ""}>
+          <svg><use href="#i-save"></use></svg>
+          <span>${busy ? "登录中" : "登录"}</span>
+        </button>
+        <button class="ghost" type="button" data-login-paste-clipboard ${busy ? "disabled" : ""}>从剪贴板粘贴</button>
+        <button class="ghost" type="button" data-login-panel-close ${busy ? "disabled" : ""}>取消</button>
+      </div>
+      ${message}
+    </div>
+  `;
+  slot
+    .querySelector("[data-login-cookie]")
+    ?.addEventListener("input", (event) => {
+      if (localLoginPanel) localLoginPanel.cookie = event.target.value;
+      updateCookieDetect();
+    });
+  slot
+    .querySelector("[data-login-paste-clipboard]")
+    ?.addEventListener("click", () => {
+      readClipboardCookie(panel);
+    });
+  slot
+    .querySelector("[data-login-submit-cookie]")
+    ?.addEventListener("click", () =>
+      submitCookieLogin(panel.account_index).catch((error) =>
+        showToast(error.message),
+      ),
+    );
+  slot
+    .querySelector("[data-login-panel-close]")
+    ?.addEventListener("click", resetLoginPanel);
+  updateCookieDetect();
+}
+
+// 和海外模块的 cookie 解析保持一致：整段请求头、开发者工具表格、JSON、手拼的 name=value
+const HOYOLAB_UID_FIELDS = ["ltuid_v2", "ltuid", "account_id_v2", "account_id"];
+const HOYOLAB_TOKEN_FIELDS = ["ltoken_v2", "ltoken", "cookie_token_v2", "cookie_token"];
+
+function hoyolabCookiePairs(text) {
+  const pairs = new Map();
+  const source = String(text || "").trim();
+  if (!source) return pairs;
+  if (source.startsWith("[") || source.startsWith("{")) {
+    try {
+      const data = JSON.parse(source);
+      const items = Array.isArray(data) ? data : [data];
+      for (const item of items) {
+        if (!item || typeof item !== "object") continue;
+        if ("name" in item) pairs.set(String(item.name), String(item.value ?? ""));
+        else if (!Array.isArray(data)) {
+          for (const [name, value] of Object.entries(item)) pairs.set(name, String(value ?? ""));
+        }
+      }
+      if (pairs.size) return pairs;
+    } catch {
+      // 不是 JSON，按普通 cookie 文本继续解析
+    }
+  }
+  const header = source.match(/^\s*cookie\s*[:：]\s*(.+)$/im);
+  for (const line of (header ? header[1] : source).split(/[;\r\n]+/)) {
+    const row = line.trim();
+    if (!row) continue;
+    // 开发者工具里框选 cookie 表格复制出来是「名称\t值\t域\t路径…」
+    const cells = row.split("\t");
+    const pair = cells.length > 1 ? `${cells[0].trim()}=${cells[1].trim()}` : row;
+    const index = pair.indexOf("=");
+    if (index <= 0) continue;
+    const name = pair.slice(0, index).trim();
+    const value = pair.slice(index + 1).trim().replace(/^"(.*)"$/, "$1").trim();
+    if (value && /^[A-Za-z0-9_.-]+$/.test(name)) pairs.set(name, value);
+  }
+  return pairs;
+}
+
+function describeHoyolabCookie(text) {
+  const pairs = hoyolabCookiePairs(text);
+  const uidField = HOYOLAB_UID_FIELDS.find((name) => pairs.get(name)) || "";
+  // 只回报命中的字段名，不把 token 的值显示到页面上
+  return {
+    uid: uidField ? pairs.get(uidField) : "",
+    token: HOYOLAB_TOKEN_FIELDS.find((name) => pairs.get(name)) || "",
+  };
+}
+
+function setCookieDetect(text, state) {
+  const node = document.querySelector("[data-login-detect]");
+  if (!node) return;
+  node.textContent = text;
+  if (state) node.dataset.state = state;
+  else delete node.dataset.state;
+}
+
+// 粘贴后立刻告诉用户解析到了什么，不用等签到才发现 cookie 少了一项
+function updateCookieDetect() {
+  const textarea = document.querySelector("[data-login-cookie]");
+  if (!textarea) return;
+  if (!textarea.value.trim()) {
+    setCookieDetect("");
+    return;
+  }
+  const { uid, token } = describeHoyolabCookie(textarea.value);
+  if (uid && token) {
+    setCookieDetect(`已识别 UID ${uid}，凭证 ${token}`, "ok");
+  } else if (uid) {
+    setCookieDetect(`已识别 UID ${uid}，但没有找到 ltoken_v2`, "warn");
+  } else if (token) {
+    setCookieDetect("已找到 token，但没有找到 ltuid_v2", "warn");
+  } else {
+    setCookieDetect("还没有识别到 ltuid_v2 / ltoken_v2", "warn");
+  }
+}
+
+async function readClipboardCookie(panel) {
+  let text = "";
+  try {
+    // 本地控制台（127.0.0.1 / localhost）属于安全上下文，浏览器会放行；换域名访问时可能被拒
+    text = await navigator.clipboard.readText();
+  } catch {
+    setCookieDetect("浏览器不允许读取剪贴板，请点一下输入框再按 Ctrl+V 粘贴", "error");
+    return;
+  }
+  if (!text.trim()) {
+    setCookieDetect("剪贴板是空的，请先在浏览器里复制 HoYoLAB 的 cookie", "error");
+    return;
+  }
+  const textarea = document.querySelector(`[data-login-cookie="${panel.account_index}"]`);
+  if (!textarea) return;
+  textarea.value = text.trim();
+  panel.cookie = textarea.value;
+  if (localLoginPanel) localLoginPanel.cookie = panel.cookie;
+  textarea.focus();
+  updateCookieDetect();
+}
+
 function updateLogs(logs) {
   const logBox = $("logs");
   const wasPinned = logsPinnedToBottom || isScrolledNearBottom(logBox);
@@ -3259,6 +3491,11 @@ async function showLoginMethods(accountIndex) {
   if (!account) {
     throw new Error("请先添加账号");
   }
+  // 国际服只有粘贴 cookie 一种登录方式，不需要先选
+  if (isOverseas(account)) {
+    showCookieLogin(accountIndex);
+    return;
+  }
   clearLoginCountdown();
   lastLoginStatus = "";
   activeLoginIndex = accountIndex;
@@ -3281,6 +3518,21 @@ function showCaptchaLogin(accountIndex) {
   activeLoginIndex = accountIndex;
   renderLoginSlot({ running: false, status: "idle" }, { forceLocal: true });
   document.querySelector(`[data-login-phone="${accountIndex}"]`)?.focus();
+}
+
+function showCookieLogin(accountIndex) {
+  clearLoginCountdown();
+  lastLoginStatus = "";
+  localLoginPanel = {
+    account_index: accountIndex,
+    mode: "cookie",
+    cookie: "",
+    message: "",
+    error: false,
+  };
+  activeLoginIndex = accountIndex;
+  renderLoginSlot({ running: false, status: "idle" }, { forceLocal: true });
+  document.querySelector(`[data-login-cookie="${accountIndex}"]`)?.focus();
 }
 
 function resetLoginPanel() {
@@ -3593,6 +3845,10 @@ async function submitCaptchaLogin(accountIndex) {
     localLoginPanel = null;
     activeLoginIndex = null;
     showToast(response.message || "登录成功");
+    forgetAccountAvatar({
+      stuid: response.account_data?.stuid || account.stuid,
+      region: account.region,
+    });
     if (response.draft) {
       applyDraftLogin(response);
     } else {
@@ -3611,6 +3867,58 @@ async function submitCaptchaLogin(accountIndex) {
     panel.verifying = false;
     panel.error = true;
     panel.message = error.message || "验证码登录失败";
+    renderLoginSlot({ running: false, status: "idle" }, { forceLocal: true });
+    throw error;
+  }
+}
+
+async function submitCookieLogin(accountIndex) {
+  collectConfig();
+  const account = config.accounts[accountIndex];
+  const panel = localLoginPanel;
+  if (!account || !panel || panel.account_index !== accountIndex) {
+    throw new Error("请先选择登录方式");
+  }
+  panel.cookie = String(
+    document.querySelector(`[data-login-cookie="${accountIndex}"]`)?.value ??
+      panel.cookie ??
+      "",
+  ).trim();
+  if (!panel.cookie) {
+    throw new Error("请粘贴 HoYoLAB 的 cookie");
+  }
+  panel.verifying = true;
+  panel.error = false;
+  panel.message = "正在登录";
+  renderLoginSlot({ running: false, status: "idle" }, { forceLocal: true });
+  try {
+    const response = await api("/api/login/cookie", {
+      method: "POST",
+      body: JSON.stringify({
+        account_index: accountIndex,
+        cookie: panel.cookie,
+        draft: Boolean(account._draft),
+        account: stripClientAccount(account),
+      }),
+    });
+    localLoginPanel = null;
+    activeLoginIndex = null;
+    showToast(response.message || "登录成功");
+    // 先清掉旧头像，下面的重绘会把新账号的头像重新取回来
+    forgetAccountAvatar({
+      stuid: response.account_data?.stuid || account.stuid,
+      region: response.account_data?.region || account.region,
+    });
+    if (response.draft) {
+      applyDraftLogin(response);
+    } else {
+      await loadConfig();
+    }
+    renderLoginSlot({ running: false, status: "idle" });
+  } catch (error) {
+    panel.verifying = false;
+    panel.error = true;
+    panel.message = error.message || "Cookie 登录失败";
     renderLoginSlot({ running: false, status: "idle" }, { forceLocal: true });
     throw error;
   }
@@ -3686,6 +3994,7 @@ function addAccount() {
 function emptyAccount(name) {
   return {
     name,
+    region: "cn",
     cookie: "",
     stuid: "",
     stoken: "",
@@ -3728,6 +4037,7 @@ function applyDraftLogin(login) {
     stuid: accountData.stuid || "",
     stoken: accountData.stoken || "",
     mid: accountData.mid || "",
+    region: accountData.region || account.region || "cn",
     _draft: true,
   });
   editingAccountIndex = index;

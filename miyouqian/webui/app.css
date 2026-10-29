@@ -1118,6 +1118,11 @@ textarea:focus {
   background: #fff6e6;
 }
 
+.acc-pill.os {
+  color: #1d5fb0;
+  background: #e6f0fd;
+}
+
 .acc-meta {
   display: flex;
   align-items: center;
@@ -1204,6 +1209,26 @@ textarea:focus {
 
 .acc-hint {
   margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.acc-region {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.acc-region .select-wrapper {
+  width: auto;
+  min-width: 190px;
+}
+
+.task-note {
+  margin: 10px 0 0;
   color: var(--muted);
   font-size: 12px;
 }
@@ -1480,6 +1505,43 @@ textarea:focus {
 
 .captcha-code-row button {
   flex: 0 0 auto;
+}
+
+.cookie-login-panel textarea {
+  min-height: 72px;
+  font-family: ui-monospace, Consolas, "Courier New", monospace;
+  font-size: 12px;
+}
+
+.login-panel-hint {
+  margin: 0;
+  font-size: 12px;
+}
+
+.login-panel-detect {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.login-panel-detect:empty {
+  display: none;
+}
+
+.login-panel-detect[data-state="ok"] {
+  color: var(--ok);
+}
+
+.login-panel-detect[data-state="warn"] {
+  color: var(--warn);
+}
+
+.login-panel-detect[data-state="error"] {
+  color: var(--danger);
+}
+
+.cookie-login-panel .captcha-login-actions {
+  flex-wrap: wrap;
 }
 
 .login-panel-message {
