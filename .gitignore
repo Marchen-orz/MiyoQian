@@ -8,14 +8,4 @@ qrcode.png
 *.log
 data/
 logs/
-tests/*
-!tests/test_exchange_scheduler.py
-!tests/test_cloud_games.py
-!tests/test_wecom_push.py
-!tests/test_push_channels.py
-!tests/test_qq_bot_push.py
-!tests/test_shop_plan_accounts.py
-!tests/test_task_isolation.py
-!tests/test_http_retry.py
-!tests/test_webui_push_channels.js
-!tests/test_webui_shop_plans.js
+tests/
