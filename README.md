@@ -279,7 +279,56 @@ A: 绑定该账号的计划会被停用并显示「账号已删除」，其他�
 
 ### Docker 部署（推荐）
 
-适合部署在服务器或 NAS 上，无需手动安装 Python 和 uv。
+适合部署在服务器或 NAS 上，无需手动安装 Python 和 uv。有两种方式：直接拉取预构建镜像（推荐，不需要仓库源码），或者从源码自己构建。
+
+#### 方式一：拉取预构建镜像
+
+镜像由 GitHub Actions 自动构建，发布在 GHCR：`ghcr.io/marchen-orz/miyouqian`，支持 `linux/amd64` 和 `linux/arm64`（普通服务器、NAS、树莓派都可以）。
+
+新建一个目录，把仓库里的 [`docker/docker-compose.image.yml`](docker/docker-compose.image.yml) 保存为 `docker-compose.yml`，然后启动：
+
+```bash
+docker compose up -d
+```
+
+不想用 compose，也可以一条命令：
+
+```bash
+docker run -d --name miyouqian --restart unless-stopped --init \
+  -p 5890:5890 -e TZ=Asia/Shanghai \
+  -v miyouqian_state:/app/state \
+  --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true \
+  ghcr.io/marchen-orz/miyouqian:latest
+```
+
+更新到最新镜像：
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+配置、凭证和日志都在 `miyouqian_state` 卷里，更新镜像不会丢。可用的标签：
+
+| 标签 | 说明 |
+| --- | --- |
+| `latest` | `master` 分支的最新构建 |
+| `0.1.0`、`0.1` | 对应 `v0.1.0` 发布（`0.1` 跟随该小版本的最新补丁） |
+| `sha-xxxxxxx` | 某一次提交的构建，需要回退到指定版本时使用 |
+
+启动后访问 `http://localhost:5890`。数据持久化，以及端口、公网访问等注意事项，见下面方式二里的“数据持久化”和“注意事项”，两种方式都适用。
+
+> 之前用方式二（源码构建）部署过、想沿用原来的数据时，把 compose 文件末尾的卷声明改成引用已有的卷：
+>
+> ```yaml
+> volumes:
+>   miyouqian_state:
+>     external: true
+>     name: docker_miyouqian_state
+> ```
+
+#### 方式二：从源码构建
+
+想改代码、或者不想用预构建镜像时使用。下面的 1、2 步是构建流程，3、4 步和注意事项两种方式通用。
 
 #### 1. 获取项目文件
 
@@ -324,7 +373,7 @@ docker compose up -d --build
 
 | Docker 卷 | 容器路径 | 说明 |
 | --- | --- | --- |
-| `docker_miyouqian_state` | `/app/state` | Docker 专用配置、登录凭证和运行日志 |
+| `docker_miyouqian_state`（方式一的 compose 文件里是 `miyouqian_state`） | `/app/state` | Docker 专用配置、登录凭证和运行日志 |
 
 容器重建后数据不会丢失。只有执行 `docker compose down -v` 或手动删除该 Docker 卷时，Docker 环境内的配置和登录凭证才会被删除。
 

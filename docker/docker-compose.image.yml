@@ -1,0 +1,28 @@
+# 直接使用预构建镜像，不需要仓库源码：
+#   把本文件保存为 docker-compose.yml，然后 docker compose up -d
+# 更新：docker compose pull && docker compose up -d
+services:
+  miyouqian:
+    image: ghcr.io/marchen-orz/miyouqian:latest
+    container_name: miyouqian
+    restart: unless-stopped
+    init: true
+    ports:
+      - "5890:5890"
+    volumes:
+      # 配置、登录凭证和日志都在这个卷里，升级镜像、重建容器都不会丢
+      - miyouqian_state:/app/state
+    environment:
+      - TZ=Asia/Shanghai
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  miyouqian_state:
+    # 固定卷名，不随 compose 所在目录名变化
+    name: miyouqian_state
