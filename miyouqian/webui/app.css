@@ -1233,6 +1233,76 @@ textarea:focus {
   font-size: 12px;
 }
 
+/* 设备信息：档案摘要 + 申请 / 导入 / 重置 */
+.device-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.device-panel > .task-note {
+  margin: 0;
+}
+
+.device-facts {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.device-fact {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 4px 10px;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.device-fact > span {
+  color: var(--muted);
+}
+
+.device-fact code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.device-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--primary-soft);
+  font-size: 11px;
+  font-style: normal;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.device-tag.ok {
+  color: var(--ok);
+}
+
+.device-tag.warn {
+  color: var(--warn);
+}
+
+.device-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.device-import textarea {
+  min-height: 96px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
 /* 列表末尾的「添加账号」卡片 */
 .acc-add-card {
   display: flex;

@@ -207,6 +207,7 @@ class RunTasksIsolationTest(unittest.TestCase):
 
         with patch.object(runner, "GameCheckin", ExplodingGames), \
                 patch.object(runner, "BbsTasks", FakeBbs), \
+                patch.object(runner.devicelib, "ensure_device_fp", return_value=(True, "")), \
                 patch.object(runner, "save_config"):
             output = runner.run_tasks(self.CONFIG, "cfg.json", **kwargs)
         self.assertEqual(["甲", "乙"], ran)

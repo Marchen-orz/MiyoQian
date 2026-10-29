@@ -5,30 +5,16 @@ from __future__ import annotations
 
 import copy
 import pathlib
-import random
 from typing import Any
 
 import yaml
 
-from . import crypto
 from .cookies import guess_uid
+from .device import normalize_device
 from .region import REGION_CN, REGION_OS, account_region, normalize_region
 
 SENSITIVE_ACCOUNT_FIELDS = ("cookie", "stuid", "stoken", "mid")
 SUPPORTED_CLOUD_GAME_KEYS = ("genshin", "zzz")
-
-DEFAULT_DEVICE_PRESETS: list[dict[str, str]] = [
-    {"name": "Xiaomi 14", "model": "23127PN0CC"},
-    {"name": "Xiaomi 13", "model": "2211133C"},
-    {"name": "Redmi K70", "model": "2311DRK48C"},
-    {"name": "Redmi K60", "model": "23013RK75C"},
-    {"name": "OnePlus 12", "model": "PJD110"},
-    {"name": "OPPO Find X7", "model": "PHZ110"},
-    {"name": "vivo X100", "model": "V2309A"},
-    {"name": "HONOR 100", "model": "MAA-AN00"},
-    {"name": "HUAWEI Mate 60", "model": "BRA-AL00"},
-    {"name": "Samsung Galaxy S23", "model": "SM-S9110"},
-]
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "enable": True,
@@ -39,7 +25,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "log_dir": "logs",
         "log_file": "miyouqian.log",
     },
-    "device": {"id": "", "fp": "", "name": "", "model": "", "presets": DEFAULT_DEVICE_PRESETS},
+    # 设备档案由 core.device 维护：id 本地生成，fp 向服务器申请或导入，其余字段来自机型预设或导入
+    "device": {"id": "", "fp": "", "name": "", "model": ""},
     "features": {"game_checkin": True, "cloud_game_checkin": False, "bbs_tasks": False},
     "captcha": {
         "enable": False,
@@ -154,20 +141,7 @@ def normalize_config(config: dict[str, Any]) -> None:
         if account["region"] == REGION_OS and not account["stuid"] and account.get("cookie"):
             # 国际服只有 cookie 一项凭证，UID 直接从里面取，手改凭证文件时也不用另填
             account["stuid"] = guess_uid(str(account["cookie"]))
-    device = config.setdefault("device", {})
-    first_cookie = str(config["accounts"][0].get("cookie", "")) if config["accounts"] else ""
-    presets = device.setdefault("presets", copy.deepcopy(DEFAULT_DEVICE_PRESETS))
-    if not isinstance(presets, list) or not presets:
-        presets = copy.deepcopy(DEFAULT_DEVICE_PRESETS)
-        device["presets"] = presets
-    if not device.get("name") or not device.get("model"):
-        preset = random.choice([item for item in presets if isinstance(item, dict)] or DEFAULT_DEVICE_PRESETS)
-        device["name"] = str(preset.get("name") or DEFAULT_DEVICE_PRESETS[0]["name"])
-        device["model"] = str(preset.get("model") or DEFAULT_DEVICE_PRESETS[0]["model"])
-    if not device.get("id"):
-        device["id"] = crypto.device_id(first_cookie or None)
-    if not device.get("fp"):
-        device["fp"] = crypto.device_fp()
+    normalize_device(config)
     captcha = config.setdefault("captcha", {})
     captcha["channels"] = normalize_captcha_channels(captcha)
     captcha["enable"] = any(channel.get("enable") for channel in captcha["channels"])

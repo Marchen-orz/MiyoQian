@@ -24,6 +24,7 @@ import qrcode
 
 from ..auth.login import AigisRequired, CaptchaLogin, QRLogin, _QrRefreshed
 from ..core import cookies
+from ..core import device as devicelib
 from ..core.config import (
     PUSH_CHANNEL_DEFAULTS,
     PUSH_CHANNEL_FIELDS,
@@ -264,6 +265,9 @@ class WebApp:
         with self.lock:
             old_config = copy.deepcopy(self.config)
             preserve_push_channel_secrets(old_config, payload)
+            # 设备档案只通过「设备信息」的专用接口改；页面里那份可能是旧的，
+            # 照单全收会把刚申请到的 device_fp 覆盖掉
+            payload["device"] = copy.deepcopy(old_config["device"])
             normalize_config(payload)
             bind_shop_plan_accounts(payload)
             changes = diff_config(old_config, payload)
@@ -349,21 +353,72 @@ class WebApp:
         self.log(f"商品详情获取完成: {result.get('goods_name') or goods_id}", "exchange")
         return result
 
+    def ensure_device_fp(
+        self, client: ApiClient, force: bool = False, component: str = "device"
+    ) -> tuple[bool, str]:
+        """保证设备档案里有可信的 device_fp，新申请到的立刻落盘。返回 (是否可信, 失败原因)。"""
+        with self.lock:
+            device = self.config["device"]
+        before = (devicelib.effective_fp(device), device.get("fp_source"))
+        ok, reason = devicelib.ensure_device_fp(
+            client, device, force=force, emit=lambda message: self.log(message, component)
+        )
+        if (devicelib.effective_fp(device), device.get("fp_source")) != before:
+            with self.lock:
+                live = self.config["device"]
+                # 申请期间页面刚好保存过配置时 self.config 已经换了一份，把结果同步过去
+                if live is not device and live.get("id") == device.get("id"):
+                    live.update({key: device[key] for key in ("fp", "fp_source", "fp_time")})
+                save_config(self.config_path, self.config)
+        return ok, reason
+
     def ensure_shop_device_fp(self) -> dict[str, Any]:
+        """兑换计划用的 device_fp：和其它请求共用设备档案里那一枚，不再单独申请、覆盖。"""
         self.log("开始预获取商品兑换 device_fp", "exchange")
+        with ApiClient(timeout=20.0) as client:
+            ok, reason = self.ensure_device_fp(client, component="exchange")
         with self.lock:
-            config = copy.deepcopy(self.config)
-        try:
-            with ApiClient(timeout=20.0) as client:
-                device_fp = ShopExchange(client, config).fetch_device_fp()
-        except Exception as exc:
-            self.log(f"商品兑换 device_fp 获取失败: {exc}", "exchange")
-            raise
-        with self.lock:
-            self.config.setdefault("device", {})["fp"] = device_fp
-            save_config(self.config_path, self.config)
+            device_fp = devicelib.effective_fp(self.config["device"])
+        if not device_fp:
+            self.log(f"商品兑换 device_fp 获取失败: {reason}", "exchange")
+            raise RuntimeError(f"device_fp 获取失败: {reason}。可以在「设备信息」里导入真机的 device_fp")
+        if not ok:
+            self.log(f"向服务器申请 device_fp 失败（{reason}），先沿用已有的", "exchange")
         self.log("已预获取商品兑换 device_fp", "exchange")
         return {"device_fp": device_fp}
+
+    def device_info(self) -> dict[str, Any]:
+        with self.lock:
+            return devicelib.device_view(self.config["device"])
+
+    def import_device(self, text: str) -> dict[str, Any]:
+        parsed = devicelib.parse_device_import(text)
+        with self.lock:
+            changed = devicelib.apply_device_import(self.config["device"], parsed)
+            if changed:
+                save_config(self.config_path, self.config)
+            view = devicelib.device_view(self.config["device"])
+        if changed:
+            self.log(f"已导入设备信息: {'、'.join(changed)}", "device")
+        return {"changed": changed, "device": view}
+
+    def issue_device_fp(self) -> dict[str, Any]:
+        """手动向服务器重新申请 device_fp。"""
+        self.log("开始向服务器申请 device_fp", "device")
+        with ApiClient(timeout=20.0) as client:
+            ok, reason = self.ensure_device_fp(client, force=True)
+        if not ok:
+            raise RuntimeError(f"申请失败: {reason}")
+        return {"device": self.device_info()}
+
+    def reset_device(self, model: str = "") -> dict[str, Any]:
+        """换一台全新的虚拟设备（新 device_id，旧 fp 作废）。"""
+        with self.lock:
+            devicelib.reset_device(self.config["device"], model)
+            save_config(self.config_path, self.config)
+            view = devicelib.device_view(self.config["device"])
+        self.log(f"已重新生成虚拟设备: {view['name']}", "device")
+        return {"device": view}
 
     def shop_account_meta(self, account_index: int, game_biz: str = "") -> dict[str, Any]:
         account = self._account_by_index(account_index)
@@ -403,10 +458,10 @@ class WebApp:
         goods_name = str(plan.get("goods_name") or plan.get("goods_id") or "未知商品")
         log_prefix = f"【账号 {account_name}｜商品 {goods_name}】"
         self.log(f"{log_prefix}开始商品兑换", "exchange")
-        if not str(plan.get("device_fp") or "").strip():
-            raise ValueError("兑换计划缺少 device_fp，请重新添加计划")
         with self.lock:
             config = copy.deepcopy(self.config)
+        if not str(plan.get("device_fp") or "").strip() and not devicelib.effective_fp(config["device"]):
+            raise ValueError("兑换计划缺少 device_fp，请先在「设备信息」里申请或导入")
         try:
             with ApiClient(timeout=15.0) as client:
                 result = ShopExchange(
@@ -624,11 +679,8 @@ class WebApp:
         with self.lock:
             if self.login_state.get("running"):
                 raise RuntimeError("扫码登录正在进行")
-            device = dict(self.config["device"])
         with ApiClient() as client:
-            login = CaptchaLogin(client, str(device["id"]), str(device["fp"]),
-                                 str(device.get("model") or "Mi 14"),
-                                 str(device.get("name") or "Mihoyo Capture"))
+            login = CaptchaLogin(client, self._login_device(client))
             result = login.create_captcha(phone, aigis)
         self.log(f"账号 {account_name} 已发送验证码", "auth")
         return result
@@ -654,11 +706,8 @@ class WebApp:
         with self.lock:
             if self.login_state.get("running"):
                 raise RuntimeError("扫码登录正在进行")
-            device = dict(self.config["device"])
         with ApiClient() as client:
-            login = CaptchaLogin(client, str(device["id"]), str(device["fp"]),
-                                 str(device.get("model") or "Mi 14"),
-                                 str(device.get("name") or "Mihoyo Capture"))
+            login = CaptchaLogin(client, self._login_device(client))
             token_data = login.login_by_mobile_captcha(phone, captcha, action_type, aigis)
             account_data = self._complete_login_data(login, token_data)
         account = self._save_login_account(account_index, account_snapshot, account_data, draft)
@@ -725,6 +774,12 @@ class WebApp:
             "account_data": account_data,
         }
 
+    def _login_device(self, client: ApiClient) -> dict[str, Any]:
+        """登录用的设备档案快照。fp 先尽量申请好；申请不到就不带这个头，不拿随机串顶替。"""
+        self.ensure_device_fp(client, component="auth")
+        with self.lock:
+            return dict(self.config["device"])
+
     def _complete_login_data(self, login: QRLogin | CaptchaLogin, token_data: dict[str, str]) -> dict[str, str]:
         account_data = {**token_data, **login.get_additional_tokens(token_data["stoken"], token_data["mid"])}
         account_data["cookie"] = cookies.build_cookie(
@@ -776,12 +831,9 @@ class WebApp:
             if self._login_cancel.is_set():
                 return
             with self.lock:
-                device = dict(self.config["device"])
                 account_name = display_account_name(account_snapshot)
             with ApiClient() as client:
-                login = QRLogin(client, str(device["id"]), str(device["fp"]),
-                               str(device.get("model") or "Mi 14"),
-                               str(device.get("name") or "Mihoyo Capture"))
+                login = QRLogin(client, self._login_device(client))
                 url, ticket = login.fetch()
                 qr = make_qr_data_uri(url)
                 with self.lock:
@@ -1258,6 +1310,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/shop/device-fp":
                 self.send_json(self.app.ensure_shop_device_fp())
                 return
+            if path == "/api/device":
+                self.send_json(self.app.device_info())
+                return
             if path == "/api/qqbot/bind/status":
                 self.send_json(self.app.qq_bind_status())
                 return
@@ -1283,6 +1338,15 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/config":
                 self.app.set_config(payload)
                 self.send_json({"ok": True})
+                return
+            if path == "/api/device/import":
+                self.send_json({"ok": True, **self.app.import_device(str(payload.get("text") or ""))})
+                return
+            if path == "/api/device/fp":
+                self.send_json({"ok": True, **self.app.issue_device_fp()})
+                return
+            if path == "/api/device/reset":
+                self.send_json({"ok": True, **self.app.reset_device(str(payload.get("model") or ""))})
                 return
             if path == "/api/push/test":
                 channel = payload.get("channel") if isinstance(payload, dict) else None

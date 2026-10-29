@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .. import constants as c
 from ..core import cookies, crypto
+from ..core import device as devicelib
 from ..core.http import ApiClient
 
 
@@ -52,13 +53,17 @@ def passport_rsa_encrypt(text: str) -> str:
 
 
 class PassportLogin:
-    def __init__(self, client: ApiClient, device_id: str, device_fp: str,
-                 device_model: str = "Mi 14", device_name: str = "Mihoyo Capture") -> None:
+    def __init__(self, client: ApiClient, device: dict[str, Any]) -> None:
         self.client = client
-        self.device_id = device_id
-        self.device_fp = device_fp
-        self.device_model = device_model
-        self.device_name = device_name
+        self.device = device
+        self.device_id = str(device.get("id") or "")
+        # 没有 fp 就是空串，各个请求头据此省略 x-rpc-device_fp，不拿随机串顶替
+        self.device_fp = devicelib.effective_fp(device)
+        self.device_model = devicelib.device_model(device)
+        self.device_name = devicelib.device_name(device)
+
+    def _fp_header(self) -> dict[str, str]:
+        return {"x-rpc-device_fp": self.device_fp} if self.device_fp else {}
 
     def get_additional_tokens(self, stoken: str, mid: str) -> dict[str, str]:
         ltoken = self._get_ltoken(stoken, mid)
@@ -73,7 +78,7 @@ class PassportLogin:
             "x-requested-with": "com.mihoyo.hyperion",
             "referer": "https://webstatic.mihoyo.com",
             "x-rpc-device_id": self.device_id,
-            "x-rpc-device_fp": self.device_fp,
+            **self._fp_header(),
             "cookie": f"mid={mid};stoken={stoken}",
         }
 
@@ -164,7 +169,7 @@ class QRLogin(PassportLogin):
             "x-rpc-client_type": "3",
             "x-rpc-app_version": c.PASSPORT_APP_VERSION,
             "x-rpc-device_id": self.device_id,
-            "x-rpc-device_fp": self.device_fp,
+            **self._fp_header(),
             "x-rpc-game_biz": "bbs_cn",
             "x-rpc-app_id": c.PASSPORT_APP_ID,
             "x-rpc-sdk_version": c.PASSPORT_APP_VERSION,
@@ -225,11 +230,11 @@ class CaptchaLogin(PassportLogin):
             "x-rpc-app_version": c.BBS_VERSION,
             "x-rpc-client_type": "2",
             "x-rpc-app_id": c.PASSPORT_APP_ID,
-            "x-rpc-device_fp": self.device_fp,
+            **self._fp_header(),
             "x-rpc-device_name": self.device_name,
             "x-rpc-device_id": self.device_id,
             "x-rpc-device_model": self.device_model,
-            "user-agent": f"Mozilla/5.0 (Linux; Android 12) Mobile miHoYoBBS/{c.BBS_VERSION}",
+            "user-agent": f"Mozilla/5.0 (Linux; Android {devicelib.sys_version(self.device)}) Mobile miHoYoBBS/{c.BBS_VERSION}",
             "content-type": "application/json",
         }
         if create:
@@ -257,11 +262,11 @@ def print_qrcode(text: str, image_path: pathlib.Path | None = None) -> None:
         qrcode.make(text).save(image_path)
 
 
-def refresh_cookie_token(client: ApiClient, account: dict[str, Any]) -> bool:
+def refresh_cookie_token(client: ApiClient, account: dict[str, Any], device: dict[str, Any] | None = None) -> bool:
     try:
         data = client.get_json(
             c.COOKIE_TOKEN_REFRESH_URL,
-            headers={"cookie": cookies.stoken_cookie(account), "user-agent": c.DEFAULT_MOBILE_UA},
+            headers={"cookie": cookies.stoken_cookie(account), "user-agent": devicelib.mobile_ua(device or {})},
         )
         ensure_ok(data, "刷新 cookie_token 失败")
     except Exception:

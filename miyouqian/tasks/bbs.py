@@ -11,6 +11,7 @@ from typing import Any, Callable
 from .. import constants as c
 from ..auth.login import refresh_cookie_token
 from ..core import captcha, cookies, crypto
+from ..core import device as devicelib
 from ..core.http import ApiClient
 
 
@@ -131,11 +132,11 @@ class BbsTasks:
             "cookie": cookies.stoken_cookie(self.account),
             "x-rpc-client_type": "2",
             "x-rpc-app_version": c.BBS_VERSION,
-            "x-rpc-sys_version": "12",
+            "x-rpc-sys_version": devicelib.sys_version(self.device),
             "x-rpc-channel": "miyousheluodi",
             "x-rpc-device_id": str(self.device["id"]),
-            "x-rpc-device_name": str(self.device.get("name") or "Xiaomi MI 6"),
-            "x-rpc-device_model": str(self.device.get("model") or "Mi 6"),
+            "x-rpc-device_name": devicelib.device_name(self.device),
+            "x-rpc-device_model": devicelib.device_model(self.device),
             "x-rpc-h265_supported": "1",
             "Referer": "https://app.mihoyo.com",
             "Content-Type": "application/json; charset=UTF-8",
@@ -144,15 +145,17 @@ class BbsTasks:
             "x-rpc-csm_source": "home",
             "User-Agent": "okhttp/4.9.3",
         }
-        if self.device.get("fp"):
-            headers["x-rpc-device_fp"] = str(self.device["fp"])
+        # 没有可用的 fp 就不带这个头，不拿随机串顶替
+        device_fp = devicelib.effective_fp(self.device)
+        if device_fp:
+            headers["x-rpc-device_fp"] = device_fp
         return headers
 
     def _web_headers(self) -> dict[str, str]:
         return {
             "Accept": "application/json, text/plain, */*",
             "Origin": "https://webstatic.mihoyo.com",
-            "User-Agent": c.DEFAULT_MOBILE_UA,
+            "User-Agent": devicelib.mobile_ua(self.device),
             "Referer": "https://webstatic.mihoyo.com",
             "Accept-Language": "zh-CN,en-US;q=0.8",
             "X-Requested-With": "com.mihoyo.hyperion",
@@ -166,7 +169,7 @@ class BbsTasks:
             headers=self._web_headers(),
         )
         if data.get("retcode") == -100 and not retried:
-            if refresh_cookie_token(self.client, self.account):
+            if refresh_cookie_token(self.client, self.account, self.device):
                 return self._task_state(retried=True)
         return data.get("data", {}) if data.get("retcode") == 0 else {}
 

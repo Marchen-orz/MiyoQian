@@ -14,22 +14,21 @@ storage:
   log_dir: logs
   log_file: miyouqian.log
 
+# 设备档案：全部留空即可，首次运行时自动生成，之后由程序维护。
+#   id   本地生成的 device_id，长期保存
+#   fp   向官方接口申请到的 device_fp；申请不到时请求里不带 x-rpc-device_fp，不会用随机串顶替
+#   机型、系统版本等取自内置的自洽机型预设，也可以在 Web 控制台「设备信息」里导入真机信息
+# 程序还会写入这些字段，一般不用手填：
+#   fp_source  server（服务器签发）/ imported（真机导入）/ legacy（旧版本留下、来源不明，会被换掉）
+#   fp_time    取得 fp 的时间戳（秒）
+#   source     preset（内置预设）/ imported（真机导入）
+#   brand / model / name / os_version / sdk   品牌、型号、x-rpc-device_name、系统版本、API Level
+#   ua / oaid / android_id / ext_fields       只在导入真机信息后才会出现
 device:
   id: ""
   fp: ""
   name: ""
   model: ""
-  presets:
-    - name: "Xiaomi 14"
-      model: "23127PN0CC"
-    - name: "Xiaomi 13"
-      model: "2211133C"
-    - name: "Redmi K70"
-      model: "2311DRK48C"
-    - name: "OnePlus 12"
-      model: "PJD110"
-    - name: "vivo X100"
-      model: "V2309A"
 
 features:
   game_checkin: true

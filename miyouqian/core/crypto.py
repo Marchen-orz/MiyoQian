@@ -8,7 +8,6 @@ import json
 import random
 import string
 import time
-import uuid
 from typing import Any
 
 from .. import constants as c
@@ -51,13 +50,3 @@ def ds_app(body: str = "", query: str = "") -> str:
     q = query if query else ""
     sign = md5(f"salt={c.PASSPORT_APP_SALT}&t={t}&r={r}&b={b}&q={q}")
     return f"{t},{r},{sign}"
-
-
-def device_id(seed: str | None = None) -> str:
-    if seed:
-        return str(uuid.uuid3(uuid.NAMESPACE_URL, seed)).upper()
-    return str(uuid.uuid4()).upper()
-
-
-def device_fp() -> str:
-    return "".join(random.choice("0123456789abcdef") for _ in range(13))

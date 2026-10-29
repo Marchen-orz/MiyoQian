@@ -10,6 +10,7 @@ from typing import Any, Callable
 from .. import constants as c
 from ..auth.login import refresh_cookie_token
 from ..core import captcha, crypto
+from ..core import device as devicelib
 from ..core.http import ApiClient
 
 
@@ -154,7 +155,7 @@ class GameCheckin:
             "x-rpc-channel": "miyousheluodi",
             "Origin": "https://act.mihoyo.com",
             "x-rpc-app_version": c.BBS_VERSION,
-            "User-Agent": c.DEFAULT_MOBILE_UA,
+            "User-Agent": devicelib.mobile_ua(self.device),
             "x-rpc-client_type": "5",
             "Referer": "https://act.mihoyo.com/",
             "Accept-Language": "zh-CN,en-US;q=0.8",
@@ -172,7 +173,7 @@ class GameCheckin:
             headers=self._headers(game),
         )
         if data.get("retcode") == -100 and not retried:
-            if refresh_cookie_token(self.client, self.account):
+            if refresh_cookie_token(self.client, self.account, self.device):
                 return self._get_roles(game, retried=True)
         if data.get("retcode") != 0:
             return []

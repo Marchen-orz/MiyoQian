@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from .. import constants as c
-from ..core import crypto
+from ..core import device as devicelib
 from ..core.http import ApiClient
 
 EmitFn = Callable[[str], None]
@@ -89,34 +89,6 @@ class ShopExchange:
             self._add(f"商品 {goods_id} 详情补查失败，使用列表数据: {exc}")
             return raw
         return {**raw, **detail}
-
-    def fetch_device_fp(self) -> str:
-        device_id = str(self.device.get("id") or crypto.device_id()).lower()
-        body = {
-            "seed_id": crypto.device_fp()[:8],
-            "device_id": device_id,
-            "platform": "5",
-            "seed_time": str(int(time.time() * 1000)),
-            "ext_fields": (
-                "{\"userAgent\":\""
-                + c.DEFAULT_MOBILE_UA.replace('"', '\\"')
-                + "\",\"browserScreenSize\":243750,\"maxTouchPoints\":5,"
-                "\"isTouchSupported\":true,\"browserLanguage\":\"zh-CN\",\"browserPlat\":\"iPhone\","
-                "\"browserTimeZone\":\"Asia/Shanghai\",\"webGlRender\":\"Apple GPU\","
-                "\"webGlVendor\":\"Apple Inc.\",\"numOfPlugins\":0,\"listOfPlugins\":\"unknown\","
-                "\"screenRatio\":3,\"deviceMemory\":\"unknown\",\"hardwareConcurrency\":\"4\","
-                "\"cpuClass\":\"unknown\",\"ifNotTrack\":\"unknown\",\"ifAdBlock\":0,"
-                "\"hasLiedResolution\":1,\"hasLiedOs\":0,\"hasLiedBrowser\":0}"
-            ),
-            "app_name": "account_cn",
-            "device_fp": crypto.device_fp(),
-        }
-        data = self.client.post_json(c.DEVICE_FP_URL, json=body)
-        raw = data.get("data") or {}
-        device_fp = str(raw.get("device_fp") or "")
-        if data.get("retcode") != 0 or not device_fp:
-            raise ValueError(str(raw.get("msg") or data.get("message") or "device_fp 获取失败"))
-        return device_fp
 
     def points(self) -> dict[str, Any]:
         data = self.client.get_json(
@@ -245,7 +217,7 @@ class ShopExchange:
             "Connection": "keep-alive",
             "x-rpc-device_id": str(self.device["id"]),
             "x-rpc-client_type": "5",
-            "User-Agent": c.DEFAULT_MOBILE_UA,
+            "User-Agent": devicelib.mobile_ua(self.device),
             "Referer": "https://user.mihoyo.com/",
             "Accept-Language": "zh-CN,zh-Hans;q=0.9",
         }
@@ -258,16 +230,20 @@ class ShopExchange:
             "Connection": "keep-alive",
             "x-rpc-device_id": str(self.device["id"]),
             "x-rpc-client_type": "5",
-            "User-Agent": c.DEFAULT_MOBILE_UA,
+            "User-Agent": devicelib.mobile_ua(self.device),
             "Referer": f"{origin}/",
             "Accept-Language": "zh-CN,zh-Hans;q=0.9",
             "Cookie": str(self.account.get("cookie") or ""),
         }
 
     def _exchange_headers(self, plan: dict[str, Any]) -> dict[str, str]:
-        device_fp = str(plan.get("device_fp") or "").strip()
+        # 设备档案里可信的 fp 优先，这样重置设备、导入真机后旧计划也跟着换；
+        # 档案里没有可信的，才退回计划创建时存下的那枚
+        device_fp = (
+            devicelib.effective_fp(self.device) if devicelib.has_trusted_fp(self.device) else ""
+        ) or str(plan.get("device_fp") or "").strip() or devicelib.effective_fp(self.device)
         if not device_fp:
-            raise ValueError("兑换计划缺少 device_fp，请重新添加计划")
+            raise ValueError("兑换计划缺少 device_fp，请先在「设备信息」里申请或导入")
         headers = {
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "zh-CN,zh-Hans;q=0.9",
@@ -276,16 +252,16 @@ class ShopExchange:
             "Host": "api-takumi.miyoushe.com",
             "Origin": "https://webstatic.miyoushe.com",
             "Referer": "https://webstatic.miyoushe.com/",
-            "User-Agent": c.DEFAULT_MOBILE_UA,
+            "User-Agent": devicelib.mobile_ua(self.device),
             "x-rpc-app_version": c.BBS_VERSION,
             "x-rpc-channel": "appstore",
             "x-rpc-client_type": "1",
             "x-rpc-verify_key": c.PASSPORT_APP_ID,
             "x-rpc-device_fp": device_fp,
             "x-rpc-device_id": str(self.device["id"]),
-            "x-rpc-device_model": str(self.device.get("model") or "Mi 6"),
-            "x-rpc-device_name": str(self.device.get("name") or "Xiaomi MI 6"),
-            "x-rpc-sys_version": "12",
+            "x-rpc-device_model": devicelib.device_model(self.device),
+            "x-rpc-device_name": devicelib.device_name(self.device),
+            "x-rpc-sys_version": devicelib.sys_version(self.device),
             "Cookie": str(self.account.get("cookie") or ""),
         }
         return headers

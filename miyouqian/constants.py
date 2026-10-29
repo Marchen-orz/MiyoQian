@@ -56,10 +56,14 @@ COOKIE_TOKEN_BY_STOKEN_URL = (
 )
 COOKIE_TOKEN_REFRESH_URL = f"{TAKUMI_API}/auth/api/getCookieAccountInfoBySToken"
 
+WEBVIEW_CHROME_VERSION = "103.0.5060.129"
+
+# 没有设备档案可用时的兜底 UA（头像、服务器时间校准等与设备身份无关的请求）；
+# 带设备身份的请求用 core.device.mobile_ua
 DEFAULT_MOBILE_UA = (
     "Mozilla/5.0 (Linux; Android 12; Unspecified Device) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 "
-    f"Chrome/103.0.5060.129 Mobile Safari/537.36 miHoYoBBS/{BBS_VERSION}"
+    f"Chrome/{WEBVIEW_CHROME_VERSION} Mobile Safari/537.36 miHoYoBBS/{BBS_VERSION}"
 )
 
 QR_MOBILE_UA = (

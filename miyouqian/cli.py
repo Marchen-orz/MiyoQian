@@ -10,6 +10,7 @@ import sys
 from . import __version__
 from .auth.login import QRLogin, print_qrcode
 from .core import cookies
+from .core import device as devicelib
 from .core.config import (
     create_config,
     credentials_path,
@@ -86,9 +87,10 @@ def command_login(config_path: pathlib.Path, account_name: str, timeout: int, sa
     device = config["device"]
     image_path = config_path.parent / "qrcode.png" if save_image else None
     with ApiClient() as client:
-        login = QRLogin(client, str(device["id"]), str(device["fp"]),
-                         str(device.get("model") or "Mi 14"),
-                         str(device.get("name") or "Mihoyo Capture"))
+        ok, reason = devicelib.ensure_device_fp(client, device)
+        if not ok:
+            print(f"[提示] device_fp 暂时无法获取（{reason}），登录请求将不带 x-rpc-device_fp")
+        login = QRLogin(client, device)
         url, ticket = login.fetch()
         print("请用米游社 APP 扫码：我的 -> 左上角扫一扫")
         print_qrcode(url, image_path=image_path)

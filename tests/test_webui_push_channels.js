@@ -495,6 +495,7 @@ test("left panels remember their open state and default to accounts and tasks on
     ["tasks", true],
     ["schedule", false],
     ["push", false],
+    ["device", false],
     ["captcha", false],
   ]);
 
@@ -549,6 +550,7 @@ test("left panels remember their open state and default to accounts and tasks on
     tasks: true,
     schedule: false,
     push: true,
+    device: false,
     captcha: false,
   });
 });

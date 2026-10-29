@@ -137,6 +137,10 @@ let logFitQueued = false;
 const DEFAULT_AVATAR = "/assets/paimon-avatar-192.webp";
 let accountAvatars = {};         // 账号 UID -> 米游社头像地址，取到才有
 const avatarRequested = new Set(); // 已经问过后端的 UID，一次打开页面只问一次
+let deviceInfo = null;           // GET /api/device 的结果，没取到是 null
+let deviceError = "";            // 读取设备信息失败的原因
+let deviceBusy = "";             // 正在进行的操作（fp / import / reset），空表示空闲
+let deviceImportDraft = "";      // 导入框里还没提交的文字，面板重绘时保留
 
 
 const $ = (id) => document.getElementById(id);
@@ -174,6 +178,7 @@ async function loadConfig() {
   }));
   renderConfig();
   loadAllPlanAddresses();
+  loadDevice();
 }
 
 function renderConfig() {
@@ -4264,7 +4269,256 @@ function injectArrowSymbol() {
   document.body.prepend(svg);
 }
 
+// ---------------------------------------------------------------------------
+// 设备信息
+// ---------------------------------------------------------------------------
+const DEVICE_FP_TAGS = {
+  server: { tone: "ok", label: "服务器签发" },
+  imported: { tone: "ok", label: "真机导入" },
+};
+
+async function loadDevice() {
+  try {
+    deviceInfo = await api("/api/device");
+    deviceError = "";
+  } catch (error) {
+    deviceError = `设备信息读取失败：${error.message}`;
+  }
+  renderDevicePanel();
+}
+
+function deviceFpTag(info) {
+  if (!info.fp) return { tone: "warn", label: "未获取" };
+  return DEVICE_FP_TAGS[info.fp_source] || { tone: "warn", label: "来源不明" };
+}
+
+function formatDeviceTime(seconds) {
+  const value = Number(seconds);
+  if (!value) return "";
+  const date = new Date(value * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function deviceFpNote(info) {
+  if (!info.fp) {
+    return "还没有 device_fp：请求里不会带 x-rpc-device_fp（不会拿随机值冒充），可点「向服务器申请」，或在下方导入真机的。";
+  }
+  if (!info.trusted_fp) {
+    return "这枚 device_fp 来源不明（多半是旧版本随机生成的），下次任务会向服务器重新申请并替换；如果它是你自己填的真机值，请改用下方「导入」保留。";
+  }
+  const when = formatDeviceTime(info.fp_time);
+  return when ? `device_fp 取得于 ${when}。` : "";
+}
+
+function renderDevicePanel() {
+  const host = $("devicePanel");
+  if (!host) return;
+  const info = deviceInfo;
+  if (!info) {
+    host.innerHTML = `<p class="task-note">${escapeHtml(deviceError || "正在读取设备信息…")}</p>`;
+    return;
+  }
+  const tag = deviceFpTag(info);
+  const disabled = deviceBusy ? "disabled" : "";
+  const label = (task, idle, busy) => (deviceBusy === task ? busy : idle);
+  const system = info.os_version
+    ? `Android ${escapeHtml(info.os_version)}${info.sdk ? ` · SDK ${escapeHtml(info.sdk)}` : ""}`
+    : "-";
+  host.innerHTML = `
+    <div class="device-facts">
+      <div class="device-fact">
+        <span>设备</span>
+        <div>
+          <strong>${escapeHtml(info.name || info.model || "-")}</strong>
+          <em class="device-tag">${info.source === "imported" ? "真机导入" : "预设机型"}</em>
+          ${info.has_ua ? '<em class="device-tag ok">含真机 UA</em>' : ""}
+        </div>
+      </div>
+      <div class="device-fact"><span>系统</span><div>${system}</div></div>
+      <div class="device-fact"><span>device_id</span><code>${escapeHtml(info.id || "-")}</code></div>
+      <div class="device-fact">
+        <span>device_fp</span>
+        <div>
+          <code>${escapeHtml(info.fp || "-")}</code>
+          <em class="device-tag ${tag.tone}">${tag.label}</em>
+        </div>
+      </div>
+    </div>
+    <p class="task-note">${escapeHtml(deviceFpNote(info))}</p>
+    <div class="device-actions">
+      <button class="ghost" type="button" data-device-action="fp" ${disabled}>
+        <svg><use href="#i-refresh"></use></svg>
+        <span>${label("fp", "向服务器申请 fp", "申请中…")}</span>
+      </button>
+      <button class="ghost" type="button" data-device-action="reset" ${disabled}>
+        <svg><use href="#i-phone"></use></svg>
+        <span>${label("reset", "换一台虚拟设备", "生成中…")}</span>
+      </button>
+    </div>
+    <label class="device-import">
+      <span>导入真机信息</span>
+      <textarea
+        id="deviceImportText"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="粘贴米游社 App 请求的整段请求头、Copy as cURL，或含 device_id / device_fp 的 JSON"
+      >${escapeHtml(deviceImportDraft)}</textarea>
+    </label>
+    <p class="task-note">导入的 device_id、机型、系统版本、UA 会优先于预设使用；其中的 device_fp 视为可信，不会被覆盖。</p>
+    <div class="device-actions">
+      <button class="primary" type="button" data-device-action="import" ${disabled}>
+        <svg><use href="#i-save"></use></svg>
+        <span>${label("import", "导入", "导入中…")}</span>
+      </button>
+    </div>
+  `;
+}
+
+// 同一时间只做一件事；面板整块重绘，导入框里没提交的文字存在 deviceImportDraft 里
+async function runDeviceAction(task, work) {
+  if (deviceBusy) return;
+  deviceBusy = task;
+  renderDevicePanel();
+  try {
+    await work();
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    deviceBusy = "";
+    renderDevicePanel();
+  }
+}
+
+function requestDeviceFp() {
+  return runDeviceAction("fp", async () => {
+    const data = await api("/api/device/fp", { method: "POST", body: "{}" });
+    deviceInfo = data.device;
+    showToast("已向服务器申请到新的 device_fp");
+  });
+}
+
+function importDeviceInfo() {
+  const text = deviceImportDraft.trim();
+  if (!text) {
+    showToast("先粘贴要导入的内容");
+    return Promise.resolve();
+  }
+  return runDeviceAction("import", async () => {
+    const data = await api("/api/device/import", {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    });
+    deviceInfo = data.device;
+    deviceImportDraft = "";
+    const changed = data.changed || [];
+    showToast(changed.length ? `已导入：${changed.join("、")}` : "导入的内容与当前设备一致，没有变化");
+  });
+}
+
+async function resetDevice() {
+  const model = await chooseDeviceResetModel();
+  if (model === null) return;
+  await runDeviceAction("reset", async () => {
+    const data = await api("/api/device/reset", {
+      method: "POST",
+      body: JSON.stringify({ model }),
+    });
+    deviceInfo = data.device;
+    renderDevicePanel();
+    // 新设备没有 fp，顺手申请；失败也不回滚，下次任务会再试
+    try {
+      const issued = await api("/api/device/fp", { method: "POST", body: "{}" });
+      deviceInfo = issued.device;
+      showToast(`已换成 ${deviceInfo.name}，并取得新的 device_fp`);
+    } catch (error) {
+      showToast(`已换成 ${deviceInfo.name}，但 device_fp 申请失败：${error.message}`);
+    }
+  });
+}
+
+// 选一台预设机型（空字符串 = 随机）；取消返回 null
+function chooseDeviceResetModel() {
+  const presets = deviceInfo?.presets || [];
+  const current = deviceInfo?.model || "";
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = `
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="deviceResetTitle">
+        <div class="modal-head">
+          <div>
+            <h2 id="deviceResetTitle">换一台虚拟设备</h2>
+            <p>会生成新的 device_id，旧的 device_fp 作废并重新申请；账号凭证不会被清除。</p>
+          </div>
+          <button class="ghost icon-only" type="button" data-modal-cancel title="关闭">
+            <svg><use href="#i-x"></use></svg>
+          </button>
+        </div>
+        <label>
+          <span>机型</span>
+          <div class="select-wrapper">
+            <select id="deviceResetModel">
+              <option value="">随机（从预设中任选）</option>
+              ${presets
+                .map(
+                  (preset) =>
+                    `<option value="${escapeAttr(preset.model)}">${escapeHtml(preset.label)}（Android ${escapeHtml(preset.os_version)}）${preset.model === current ? " · 当前" : ""}</option>`,
+                )
+                .join("")}
+            </select>
+            <svg class="select-arrow" width="12" height="8" aria-hidden="true">
+              <use href="#arrow-down"/>
+            </svg>
+          </div>
+        </label>
+        <div class="modal-actions">
+          <button class="ghost" type="button" data-modal-cancel>取消</button>
+          <button class="primary" type="button" data-modal-confirm>
+            <svg><use href="#i-phone"></use></svg>
+            <span>确认更换</span>
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.insertBefore(overlay, document.querySelector(".toast"));
+    const select = overlay.querySelector("#deviceResetModel");
+    const finish = (value) => {
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.querySelectorAll("[data-modal-cancel]").forEach((control) => {
+      control.addEventListener("click", () => finish(null));
+    });
+    overlay
+      .querySelector("[data-modal-confirm]")
+      ?.addEventListener("click", () => finish(select.value));
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) finish(null);
+    });
+    overlay.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") finish(null);
+    });
+    select.focus();
+  });
+}
+
+function bindDeviceEvents() {
+  document.addEventListener("click", (event) => {
+    const button = event.target?.closest?.("[data-device-action]");
+    if (!button || button.disabled) return;
+    const action = button.dataset.deviceAction;
+    if (action === "fp") requestDeviceFp();
+    else if (action === "import") importDeviceInfo();
+    else if (action === "reset") resetDevice();
+  });
+  document.addEventListener("input", (event) => {
+    if (event.target?.id === "deviceImportText") deviceImportDraft = event.target.value;
+  });
+}
+
 function bindEvents() {
+  bindDeviceEvents();
   document.querySelectorAll("summary button, summary input")
       .forEach((control) => {
         control.addEventListener("click", (event) => event.stopPropagation());

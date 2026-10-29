@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from ..core import device as devicelib
 from ..core.config import find_account, save_config
 from ..core.http import ApiClient
 from ..core.region import REGION_CN, REGION_OS, account_region
@@ -122,7 +123,21 @@ def run_tasks(
 
     # 国服 / 国际服共用一份账号列表和配置，只在这里按账号的 region 分发到各自的实现
     runners = {REGION_CN: run_cn_account, REGION_OS: run_os_account}
+    # 米游币任务的请求头会带 x-rpc-device_fp：开跑前确认有可信的 fp，没有就向服务器申请一次。
+    # 申请失败也照常执行，只是请求里不带这个头
+    device = config.get("device")
+    wants_bbs_fp = (
+        not games_only
+        and features.get("bbs_tasks", False)
+        and isinstance(device, dict)
+        and any(account_region(account) == REGION_CN for account in accounts)
+    )
     with ApiClient() as client:
+        if wants_bbs_fp and devicelib.needs_fp(device):
+            ok, reason = devicelib.ensure_device_fp(client, device, emit=add)
+            if not ok:
+                consequence = "沿用配置里已有的 device_fp" if devicelib.effective_fp(device) else "请求里不带 x-rpc-device_fp"
+                add(f"device_fp 暂时无法获取（{reason}），本次米游币任务{consequence}", "bbs")
         for index, account in enumerate(accounts, start=1):
             region = account_region(account)
             suffix = "（国际服）" if region == REGION_OS else ""
