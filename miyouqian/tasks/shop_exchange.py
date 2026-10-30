@@ -312,7 +312,8 @@ def normalize_games(raw_games: list[Any]) -> list[dict[str, str]]:
             continue
         key = str(item.get("key") or "")
         name = str(item.get("name") or key)
-        if key:
+        # 接口自带的「全部商品」key 是 all，按它查不到任何商品；不带分区查询才是全部，上面已经有了
+        if key and key != "all":
             games.append({"key": key, "name": name})
     return games
 
