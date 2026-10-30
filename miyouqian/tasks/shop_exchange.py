@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import random
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
@@ -15,6 +16,30 @@ from ..core.http import ApiClient
 
 EmitFn = Callable[[str], None]
 BJT = timezone(timedelta(hours=8))
+
+# 补查商品详情的并发数
+DETAIL_WORKERS = 6
+
+# 重试也不会成功的失败：账号自身的原因，或商品已经没了。只按返回的文字判断；
+# 开抢瞬间返回的「未到兑换时间」之类必须继续重试，所以不能把它们列进来。
+TERMINAL_FAILURES = (
+    ("米游币不足", ("米游币不足", "余额不足", "积分不足")),
+    ("已达限购上限", ("兑换上限", "已达上限", "限购")),
+    ("商品已售罄", ("已售罄", "已兑完", "库存不足")),
+    ("登录已失效", ("未登录", "登录失效", "请先登录")),
+)
+LOGIN_RETCODES = {-100}
+# 同一种不可重试的失败连续出现这么多次才提前结束，防止开抢瞬间的一次误判
+TERMINAL_CONFIRM_HITS = 2
+
+
+def terminal_failure_reason(retcode: Any, message: str) -> str:
+    if retcode in LOGIN_RETCODES:
+        return "登录已失效"
+    for reason, keywords in TERMINAL_FAILURES:
+        if any(keyword in message for keyword in keywords):
+            return reason
+    return ""
 
 
 class ShopExchange:
@@ -32,7 +57,7 @@ class ShopExchange:
         self.emit = emit
 
     def goods(self, game: str = "", max_pages: int = 5) -> dict[str, Any]:
-        goods: list[dict[str, Any]] = []
+        raw_goods: list[dict[str, Any]] = []
         games: list[dict[str, str]] = []
         for page in range(1, max_pages + 1):
             data = self.client.get_json(
@@ -54,10 +79,12 @@ class ShopExchange:
             page_goods = raw.get("list") or []
             if not isinstance(page_goods, list) or not page_goods:
                 break
-            for item in page_goods:
-                if not isinstance(item, dict):
-                    continue
-                goods.append(normalize_good(self._enrich_good_for_time(item)))
+            raw_goods.extend(item for item in page_goods if isinstance(item, dict))
+        # 未开售的商品要逐个补查详情才有开售时间，串行的话商品一多就要等很久
+        if raw_goods:
+            with ThreadPoolExecutor(max_workers=min(DETAIL_WORKERS, len(raw_goods))) as pool:
+                raw_goods = list(pool.map(self._enrich_good_for_time, raw_goods))
+        goods = [normalize_good(item) for item in raw_goods]
         goods.sort(key=goods_sort_key)
         return {"games": games, "goods": goods}
 
@@ -190,6 +217,7 @@ class ShopExchange:
         deadline = time.time() + duration
         last: dict[str, Any] = {}
         attempt = 0
+        terminal_hits = 0
         while True:
             attempt += 1
             self._add(f"正在发送第 {attempt} 次商品兑换请求")
@@ -206,7 +234,13 @@ class ShopExchange:
             remaining = deadline - time.time()
             if last.get("ok") or remaining <= 0:
                 return last
-            sleep_seconds = max(interval + random.uniform(-0.5, 0.5), 0.05)
+            reason = terminal_failure_reason(last.get("retcode"), str(last.get("message") or ""))
+            terminal_hits = terminal_hits + 1 if reason else 0
+            if terminal_hits >= TERMINAL_CONFIRM_HITS:
+                self._add(f"商品 {plan.get('goods_id', '')} 连续返回「{reason}」，重试不会成功，提前结束")
+                return last
+            # 抖动按间隔等比放大缩小，平均间隔才和界面里填的一致
+            sleep_seconds = max(interval * random.uniform(0.7, 1.3), 0.05)
             time.sleep(min(sleep_seconds, remaining))
 
     def _goods_headers(self) -> dict[str, str]:

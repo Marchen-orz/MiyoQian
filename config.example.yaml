@@ -114,8 +114,10 @@ push:
       priority: 5         # 优先级 0-10，默认 5
 
 shop_exchange:
-  enable: true
-  retry_seconds: 20
-  retry_interval: 0.4
+  enable: true        # 定时兑换总开关，关闭后仍可手动执行
+  retry_seconds: 20   # 0 表示只请求一次；连续确认不可恢复错误时提前停止
+  retry_interval: 0.4 # 秒，实际间隔含少量随机浮动
   push: true          # 是否发送兑换结果推送
+  # 在 Web 控制台批量管理；每条计划自动生成稳定 id，并按 account_stuid 绑定账号
+  # 界面时间为北京时间，exchange_at 保存 Unix 秒时间戳；已错过的时间不会补跑
   plans: []

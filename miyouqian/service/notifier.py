@@ -580,8 +580,12 @@ def build_exchange_template_context(
     """为商品兑换构建推送模板上下文"""
     status = "兑换成功" if success else "兑换失败"
     retcode = result.get("retcode", -1)
+    # 执行本身出了异常时没有返回码
+    retcode_text = "-" if retcode is None else str(retcode)
     message = result.get("message", "未知结果")
     attempt = result.get("attempt", 1)
+    # 虚拟商品才有游戏角色，实体商品没有这一行
+    role = " / ".join(part for part in (plan.get("role_name"), plan.get("uid")) if part)
 
     # 商品信息
     price = plan.get("price", 0)
@@ -610,13 +614,17 @@ def build_exchange_template_context(
         "account_name": html.escape(account_name),
         "account_name_text": account_name,
         "retcode": str(retcode),
+        "retcode_text": retcode_text,
         "message": html.escape(message),
         "message_text": message,
         "attempt": str(attempt),
         "exchange_time": exchange_time,
         "icon_html": icon_html,
-        "detail_html": html.escape(f"结果：{message}({retcode})，尝试 {attempt} 次"),
-        "detail_text": f"结果：{message}({retcode})，尝试 {attempt} 次",
+        "detail_html": html.escape(f"结果：{message}({retcode_text})，尝试 {attempt} 次"),
+        "detail_text": f"结果：{message}({retcode_text})，尝试 {attempt} 次",
+        "role_line_text": f"角色：{role}\n" if role else "",
+        "role_line_markdown": f"> 🎮 **角色：**{role}\n" if role else "",
+        "role_line_html": f"🎮 <b>角色：</b>{html.escape(role)}\n" if role else "",
     }
 
 

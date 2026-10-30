@@ -30,10 +30,12 @@ from ..core.config import (
     PUSH_CHANNEL_FIELDS,
     bind_shop_plan_accounts,
     find_account_index_by_stuid,
+    find_shop_plan,
     load_config,
     log_path,
     normalize_config,
     normalize_push_channels,
+    preserve_shop_plan_runtime,
     save_config,
     validate_unique_account_uids,
 )
@@ -87,6 +89,13 @@ def check_password(password: str, stored_hash: str) -> bool:
 
 def is_external_host(host: str) -> bool:
     return host not in ("127.0.0.1", "localhost", "::1")
+
+
+def summarize_exchange_result(result: dict[str, Any]) -> str:
+    """写进计划 last_result 的一句话。执行本身出了异常时没有 retcode，直接用异常说明。"""
+    if result.get("error"):
+        return str(result.get("message") or "异常")
+    return f"{result.get('message', '未知结果')}({result.get('retcode')})，请求 {result.get('attempt', 1)} 次"
 
 
 class WebApp:
@@ -265,11 +274,13 @@ class WebApp:
         with self.lock:
             old_config = copy.deepcopy(self.config)
             preserve_push_channel_secrets(old_config, payload)
+            preserve_shop_plan_runtime(old_config, payload)
             # 设备档案只通过「设备信息」的专用接口改；页面里那份可能是旧的，
             # 照单全收会把刚申请到的 device_fp 覆盖掉
             payload["device"] = copy.deepcopy(old_config["device"])
             normalize_config(payload)
             bind_shop_plan_accounts(payload)
+            self._guard_running_plans(old_config, payload)
             changes = diff_config(old_config, payload)
             self.config = payload
             save_config(self.config_path, self.config)
@@ -292,6 +303,20 @@ class WebApp:
                 self.log(f"配置项变更过多，已省略 {len(visible_changes) - 50} 项", "config")
         else:
             self.log("配置已保存，未检测到配置项变化", "config")
+
+    def _guard_running_plans(self, old_config: dict[str, Any], payload: dict[str, Any]) -> None:
+        """正在兑换的计划不能删，也不能改会影响这次请求的字段（页面也会拦，这里兜底旧页面）。"""
+        guarded = ("goods_id", "exchange_at", "account_stuid", "address_id", "uid", "region", "game_biz")
+        new_plans = {plan.get("id"): plan for plan in (payload.get("shop_exchange") or {}).get("plans") or []}
+        for plan_id in self.exchange_scheduler.status().get("running_plans", []):
+            old = find_shop_plan(old_config, plan_id)
+            if old is None:
+                continue
+            new = new_plans.get(plan_id)
+            if new is None:
+                raise ValueError("该兑换计划正在执行，暂不能删除")
+            if any(old.get(key) != new.get(key) for key in guarded):
+                raise ValueError("该兑换计划正在执行，暂不能修改")
 
     def account_avatars(self, keys: list[str]) -> dict[str, Any]:
         """账号头像地址。键写成 uid（国服）或 os:uid（国际服），两边的 UID 可能撞号。
@@ -477,104 +502,104 @@ class WebApp:
         self.log(f"{log_prefix}商品兑换结束: {summary}", "exchange")
         return result
 
-    def shop_exchange_plan_once(self, plan_index: int) -> dict[str, Any]:
-        with self.lock:
-            plans = self.config.get("shop_exchange", {}).get("plans") or []
-            shop_config = self.config.get("shop_exchange", {})
-            if plan_index < 0 or plan_index >= len(plans):
-                raise ValueError("兑换计划不存在")
-            plan = copy.deepcopy(plans[plan_index])
-            goods_name = plan.get("goods_name") or plan.get("goods_id")
-        self.log(f"开始手动执行商品兑换计划 {plan_index + 1}: {goods_name}", "exchange")
-        self.exchange_scheduler.update_progress(plan_index, attempt=0, message="准备兑换")
+    def shop_exchange_plan_once(self, plan_id: str) -> dict[str, Any]:
+        """手动执行一个已保存的计划。"""
+        return self._execute_plan(plan_id, manual=True)
+
+    def run_shop_exchange_plan(self, plan_id: str) -> None:
+        """调度器到点触发的入口。"""
+        self._execute_plan(plan_id, manual=False)
+
+    def shop_exchange_adhoc(self, plan: dict[str, Any]) -> dict[str, Any]:
+        """不保存计划的一次性兑换（商品列表里的「兑换」）。
+        进度挂在临时 key 上，界面同样能看到第几次尝试。"""
+        goods_name = str(plan.get("goods_name") or plan.get("goods_id") or "未知商品")
+        key = f"adhoc:{plan.get('goods_id', '')}:{plan.get('account_stuid') or plan.get('account_index', 0)}"
+        if not self.exchange_scheduler.begin(key, goods_name):
+            raise ValueError("该商品正在兑换中，请稍候")
         try:
             result = self.shop_exchange_once(
                 plan,
                 on_progress=lambda attempt, msg: self.exchange_scheduler.update_progress(
-                    plan_index, attempt=attempt, message=msg
+                    key, attempt=attempt, message=msg
                 ),
             )
-        except Exception as exc:
-            summary = f"异常: {exc}"
-            with self.lock:
-                plans = self.config.get("shop_exchange", {}).get("plans") or []
-                if plan_index < len(plans):
-                    plans[plan_index]["last_result"] = summary
-                    plans[plan_index]["last_run"] = datetime.now().isoformat(timespec="seconds")
-                    plans[plan_index]["last_attempt_key"] = f"manual:{datetime.now().isoformat(timespec='seconds')}"
-                    save_config(self.config_path, self.config)
-                    self.exchange_scheduler.reload(self.config)
-            if shop_config.get("push", False):
-                self._send_exchange_push(goods_name, {"ok": False, "message": summary}, plan)
-            raise
         finally:
-            self.exchange_scheduler.clear_progress(plan_index)
-        summary = f"{result.get('message', '未知结果')}({result.get('retcode')})，请求 {result.get('attempt', 1)} 次"
+            self.exchange_scheduler.end(key)
         with self.lock:
-            plans = self.config.get("shop_exchange", {}).get("plans") or []
-            if plan_index < len(plans):
-                plans[plan_index]["last_result"] = summary
-                plans[plan_index]["last_run"] = datetime.now().isoformat(timespec="seconds")
-                plans[plan_index]["last_attempt_key"] = f"manual:{datetime.now().isoformat(timespec='seconds')}"
-                if result.get("ok"):
-                    plans[plan_index]["enable"] = False
-                save_config(self.config_path, self.config)
-                self.exchange_scheduler.reload(self.config)
-        self.log(f"手动商品兑换计划完成 {plan_index + 1}: {goods_name}，{summary}", "exchange")
-
-        # 发送兑换结果推送
-        if shop_config.get("push", False):
+            push = bool(self.config.get("shop_exchange", {}).get("push", False))
+        if push:
             self._send_exchange_push(goods_name, result, plan)
-
         return result
 
-    def run_shop_exchange_plan(self, plan_index: int) -> None:
-        with self.lock:
-            plans = self.config.get("shop_exchange", {}).get("plans") or []
-            shop_config = self.config.get("shop_exchange", {})
-            if plan_index < 0 or plan_index >= len(plans):
-                raise ValueError("兑换计划不存在")
-            plan = copy.deepcopy(plans[plan_index])
-            goods_name = plan.get("goods_name") or plan.get("goods_id")
-            exchange_at = int(plan.get("exchange_at") or 0)
-            plans[plan_index]["last_attempt_key"] = f"{plan.get('goods_id', '')}:{exchange_at}"
-            plans[plan_index]["last_run"] = datetime.now().isoformat(timespec="seconds")
-            save_config(self.config_path, self.config)
-        self.log(f"开始执行商品兑换计划: {goods_name}", "exchange")
-        try:
-            result = self.shop_exchange_once(
-                plan,
-                on_progress=lambda attempt, msg: self.exchange_scheduler.update_progress(
-                    plan_index, attempt=attempt, message=msg
-                ),
-            )
-        except Exception as exc:
-            summary = f"异常: {exc}"
-            with self.lock:
-                plans = self.config.get("shop_exchange", {}).get("plans") or []
-                if plan_index < len(plans):
-                    plans[plan_index]["last_result"] = summary
-                    plans[plan_index]["last_run"] = datetime.now().isoformat(timespec="seconds")
-                    save_config(self.config_path, self.config)
-            self.exchange_scheduler.reload(self.config) # 移出锁外,防止嵌套等待
-            if shop_config.get("push", False):
-                self._send_exchange_push(goods_name, {"ok": False, "message": summary, "attempt": 0}, plan)
-            raise
-        summary = f"{result.get('message', '未知结果')}({result.get('retcode')})，请求 {result.get('attempt', 1)} 次"
-        with self.lock:
-            plans = self.config.get("shop_exchange", {}).get("plans") or []
-            if plan_index < len(plans):
-                plans[plan_index]["last_result"] = summary
-                plans[plan_index]["last_run"] = datetime.now().isoformat(timespec="seconds")
-                if result.get("ok"):
-                    plans[plan_index]["enable"] = False
-                save_config(self.config_path, self.config)
-        self.exchange_scheduler.reload(self.config) #同上
-        self.log(f"商品兑换计划完成: {goods_name}，{summary}", "exchange")
+    def _scheduled_run_allowed(self, plan: dict[str, Any]) -> bool:
+        shop = self.config.get("shop_exchange") or {}
+        if not shop.get("enable") or plan.get("enable") is False or plan.get("auto") is False:
+            return False
+        # 调度器按服务器时间校准后触发，本机时钟可能快慢几秒；差得远说明时间已被改到之后，
+        # 这次旧触发不该去消耗新的一轮
+        return int(plan.get("exchange_at") or 0) - time.time() <= 300
 
-        # 发送兑换结果推送
-        if shop_config.get("push", False):
+    def _execute_plan(self, plan_id: str, *, manual: bool) -> dict[str, Any]:
+        """定时触发和手动执行共用：登记进度 → 兑换 → 按 id 写回结果 → 推送。
+
+        结果一律按 id 写回：兑换要等好几秒，期间页面可能删了、排序了别的计划，
+        按下标写回会把结果记到别的计划头上。"""
+        with self.lock:
+            live = find_shop_plan(self.config, plan_id)
+            if live is None:
+                raise ValueError("兑换计划不存在")
+            plan = copy.deepcopy(live)
+            goods_name = str(plan.get("goods_name") or plan.get("goods_id") or "未知商品")
+            push = bool(self.config.get("shop_exchange", {}).get("push", False))
+            if not manual and not self._scheduled_run_allowed(live):
+                self.log(f"计划已暂停或改期，跳过本次定时兑换: {goods_name}", "exchange")
+                return {"ok": False, "skipped": True, "message": "计划已暂停或改期"}
+            # 定时触发和手动执行（或连点两次）不能同时下单
+            if not self.exchange_scheduler.begin(plan_id, goods_name):
+                raise ValueError("该计划正在兑换中，请稍候")
+        error: Exception | None = None
+        try:
+            if not manual:
+                # 先打上「已尝试」标记，调度器重载时才不会把同一个时间点再排一次
+                with self.lock:
+                    live = find_shop_plan(self.config, plan_id)
+                    if live is not None:
+                        exchange_at = int(live.get("exchange_at") or 0)
+                        live["last_attempt_key"] = f"{live.get('goods_id', '')}:{exchange_at}"
+                        live["last_run"] = datetime.now().isoformat(timespec="seconds")
+                        save_config(self.config_path, self.config)
+            self.log(f"开始{'手动' if manual else ''}执行商品兑换计划: {goods_name}", "exchange")
+            try:
+                result = self.shop_exchange_once(
+                    plan,
+                    on_progress=lambda attempt, msg: self.exchange_scheduler.update_progress(
+                        plan_id, attempt=attempt, message=msg
+                    ),
+                )
+            except Exception as exc:
+                error = exc
+                result = {"ok": False, "retcode": None, "message": f"异常: {exc}", "attempt": 0, "error": True}
+            summary = summarize_exchange_result(result)
+            with self.lock:
+                live = find_shop_plan(self.config, plan_id)
+                if live is not None:
+                    live["last_result"] = summary
+                    live["last_ok"] = bool(result.get("ok"))
+                    live["last_run"] = datetime.now().isoformat(timespec="seconds")
+                    if result.get("ok"):
+                        live["enable"] = False
+                    save_config(self.config_path, self.config)
+        finally:
+            self.exchange_scheduler.end(plan_id)
+        # 移出锁外：重载会等被移除的线程退出，持锁等待可能互相卡住
+        self.exchange_scheduler.reload(self.config)
+        self.log(f"商品兑换计划完成: {goods_name}，{summary}", "exchange")
+        if push:
             self._send_exchange_push(goods_name, result, plan)
+        if error is not None:
+            raise error
+        return result
 
     def _send_exchange_push(self, goods_name: str, result: dict[str, Any], plan: dict[str, Any]) -> None:
         """发送商品兑换结果推送"""
@@ -1434,20 +1459,21 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"ok": True})
                 return
             if path == "/api/shop/exchange":
-                if "plan_index" in payload:
-                    result = self.app.shop_exchange_plan_once(int(payload.get("plan_index")))
+                plan_id = str(payload.get("plan_id") or "")
+                if not plan_id and "plan_index" in payload:
+                    # 旧页面缓存还在发下标，翻译成 id
+                    plans = self.app.config.get("shop_exchange", {}).get("plans") or []
+                    index = int(payload.get("plan_index"))
+                    if 0 <= index < len(plans):
+                        plan_id = str(plans[index].get("id") or "")
+                if plan_id:
+                    result = self.app.shop_exchange_plan_once(plan_id)
                     self.send_json({"ok": True, "result": result, "config": self.app.get_config()})
                     return
                 plan = payload.get("plan")
                 if not isinstance(plan, dict):
                     raise ValueError("兑换计划必须是 JSON 对象")
-                result = self.app.shop_exchange_once(plan)
-                # 处理直接传递plan的情况，也需要推送支持
-                shop_config = self.app.config.get("shop_exchange", {})
-                if shop_config.get("push", False):
-                    goods_name = plan.get("goods_name") or plan.get("goods_id") or "未知商品"
-                    self.app._send_exchange_push(goods_name, result, plan)
-                self.send_json({"ok": True, "result": result})
+                self.send_json({"ok": True, "result": self.app.shop_exchange_adhoc(plan)})
                 return
             self.send_error_json("接口不存在", HTTPStatus.NOT_FOUND)
         except AigisRequired as exc:
@@ -1488,16 +1514,15 @@ class Handler(BaseHTTPRequestHandler):
         # 如果是 HTML 文件，给静态资源添加版本号
         if content_type == "text/html":
             html_content = data.decode("utf-8")
-            app_js_path = WEB_ROOT / "app.js"
-            if app_js_path.exists():
-                mtime = int(app_js_path.stat().st_mtime)
-                html_content = html_content.replace('src="/app.js"', f'src="/app.js?v={mtime}"')
+            for script in ("shop.js", "app.js"):
+                script_path = WEB_ROOT / script
+                if script_path.exists():
+                    mtime = int(script_path.stat().st_mtime)
+                    html_content = html_content.replace(f'src="/{script}"', f'src="/{script}?v={mtime}"')
             data = html_content.encode("utf-8")
 
-        # 生成 ETag（基于文件内容和修改时间）
-        mtime = target.stat().st_mtime
-        size = target.stat().st_size
-        etag = f'"{int(mtime)}-{size}"'
+        # ETag 取最终发出的内容：HTML 里注入了脚本版本号，只看 HTML 文件本身会让旧页面一直 304
+        etag = f'"{hashlib.sha1(data).hexdigest()[:16]}"'
 
         # 检查 If-None-Match 头
         if self.headers.get("If-None-Match") == etag:

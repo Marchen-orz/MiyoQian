@@ -344,7 +344,8 @@ button.is-loading::before {
 
 .status-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin-bottom: 14px;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
 .metric,
@@ -355,8 +356,12 @@ button.is-loading::before {
 }
 
 .metric {
-  min-height: 82px;
-  padding: 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 8px;
+  align-items: baseline;
+  min-height: 0;
+  padding: 10px 14px;
   position: relative;
   overflow: hidden;
 }
@@ -369,10 +374,23 @@ label span,
 }
 
 .metric strong {
-  display: block;
-  margin-top: 2px;
-  font-size: 16px;
-  overflow-wrap: anywhere;
+  grid-column: 1 / -1;
+  margin-top: 1px;
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metric small {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.metric small span {
+  color: inherit;
+  font-size: inherit;
 }
 
 .app-layout {
@@ -1688,13 +1706,9 @@ textarea:focus {
   max-height: none;
 }
 
-.shop-status {
-  margin-bottom: 14px;
-}
-
 .shop-layout {
   display: grid;
-  grid-template-columns: minmax(520px, 1fr) minmax(340px, 0.42fr);
+  grid-template-columns: minmax(480px, 1fr) minmax(380px, 0.5fr);
   gap: 12px;
   align-items: start;
 }
@@ -2064,7 +2078,7 @@ textarea:focus {
   .shop-view .shop-layout {
     flex: 1;
     min-height: 0;
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 0.42fr);
+    grid-template-columns: minmax(0, 1fr) minmax(380px, 0.5fr);
     grid-template-rows: minmax(0, 1fr);
     align-items: stretch;
   }
@@ -2181,6 +2195,11 @@ textarea:focus {
 }
 
 @media (max-width: 860px) {
+  .metric small {
+    white-space: normal;
+    text-align: right;
+  }
+
   .topbar {
     align-items: flex-start;
     grid-template-columns: 1fr;
@@ -2360,9 +2379,12 @@ textarea:focus {
     font-size: 26px;
   }
 
-  .panel,
-  .metric {
+  .panel {
     padding: 14px;
+  }
+
+  .metric {
+    padding: 10px 12px;
   }
 }
 
@@ -2448,4 +2470,230 @@ textarea:focus {
   font-size: 13px;
   margin-top: 12px;
   min-height: 20px;
+}
+
+/* 兑换计划：勾选后批量管理；卡片沿用原来的摘要 + 展开配置结构 */
+.shop-plan-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.shop-plan-tools select,
+.shop-plan-tools button,
+.shop-batch-bar button {
+  min-height: 32px;
+}
+
+.shop-plan-tools .select-wrapper {
+  flex: none;
+  width: 118px;
+}
+
+.shop-plan-tools .shop-plan-check {
+  margin-right: auto;
+}
+
+.shop-plan-check {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.shop-batch-bar {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.shop-batch-bar button {
+  padding: 4px 2px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  .shop-batch-bar {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.shop-inline-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.shop-inline-note:empty {
+  display: none;
+}
+
+.shop-plan-summary {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  cursor: default;
+}
+
+.shop-plan > .shop-plan-foot {
+  padding: 6px 12px 8px;
+  border-top: 1px solid var(--line);
+}
+
+.shop-plan-result {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shop-plan-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.shop-plan-actions button {
+  min-height: 30px;
+  padding: 3px 9px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.shop-plan-actions .icon-only {
+  width: 30px;
+  min-width: 30px;
+  padding: 0;
+}
+
+.plan-badge.ok {
+  color: var(--ok);
+  background: #eaf7f0;
+}
+
+.plan-badge.warn {
+  color: #99620b;
+  background: #fff4dc;
+}
+
+.plan-badge.danger {
+  color: var(--danger);
+  background: #fcecec;
+}
+
+.check-row input[type="checkbox"]:indeterminate {
+  border-color: var(--primary);
+  background: var(--primary);
+}
+
+.check-row input[type="checkbox"]:indeterminate::after {
+  inset: 8px 4px;
+  height: 2px;
+  opacity: 1;
+  transform: none;
+  -webkit-mask: none;
+  mask: none;
+}
+
+/* 统一的操作弹窗：添加计划、批量改时间、换账号、立即兑换确认 */
+.shop-dialog {
+  width: min(560px, 100%);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+}
+
+.shop-dialog-sub {
+  margin: -6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.shop-edit-form {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.shop-edit-form:disabled {
+  opacity: 0.6;
+}
+
+.shop-edit-form .wide {
+  grid-column: 1 / -1;
+}
+
+.shop-edit-form select,
+.shop-edit-form input[type="datetime-local"] {
+  width: 100%;
+}
+
+.shop-dialog-accounts,
+.shop-dialog-goods {
+  display: grid;
+  gap: 10px;
+  max-height: 38vh;
+  overflow-y: auto;
+}
+
+.shop-dialog-accounts .shop-balance {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.shop-dialog-feedback {
+  color: var(--danger);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.shop-dialog-feedback:empty {
+  display: none;
+}
+
+.toast {
+  z-index: 100;
+  max-height: 40vh;
+  overflow-y: auto;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.toast[data-tone="error"] {
+  background: #ba3d3d;
+}
+
+.toast[data-tone="ok"] {
+  background: #24845b;
+}
+
+.toast[data-tone="warn"] {
+  background: #986516;
+}
+
+/* 开关放在 .form-grid 里时，不吃表单输入框的最小高度和内边距 */
+.shop-side .form-grid input[type="checkbox"] {
+  width: 20px;
+  min-height: 20px;
+  height: 20px;
+  padding: 0;
+}
+
+/* 右栏的高度留给计划列表：自动兑换设置只保留标题和控件 */
+.shop-side .panel:first-child .panel-head p {
+  display: none;
+}
+
+.shop-plan-summary {
+  min-height: 0;
+  padding: 6px 10px;
+}
+
+.shop-plan > .shop-plan-foot {
+  padding: 4px 10px 6px;
 }

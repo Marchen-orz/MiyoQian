@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 import pathlib
+import uuid
 from typing import Any
 
 import yaml
@@ -201,9 +202,15 @@ def normalize_shop_exchange(config: dict[str, Any]) -> None:
     if not isinstance(raw_plans, list):
         raw_plans = []
     plans: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
     for raw in raw_plans:
         if not isinstance(raw, dict):
             continue
+        # 计划靠 id 认人：下标会随删除、排序变化，执行结果不能按下标写回
+        plan_id = str(raw.get("id") or "").strip()
+        if not plan_id or plan_id in seen_ids:
+            plan_id = uuid.uuid4().hex[:12]
+        seen_ids.add(plan_id)
         try:
             account_index = max(int(raw.get("account_index", 0)), 0)
         except (TypeError, ValueError):
@@ -213,6 +220,7 @@ def normalize_shop_exchange(config: dict[str, Any]) -> None:
         except (TypeError, ValueError):
             exchange_at = 0
         plan = {
+            "id": plan_id,
             "enable": parse_bool(raw.get("enable", True)),
             "auto": parse_bool(raw.get("auto", True)),
             "account_index": account_index,
@@ -233,12 +241,58 @@ def normalize_shop_exchange(config: dict[str, Any]) -> None:
             "region_name": str(raw.get("region_name") or "").strip(),
             "address_id": str(raw.get("address_id") or "").strip(),
             "last_result": str(raw.get("last_result") or ""),
+            # 最近一次兑换是否成功；None 表示还没执行过，界面靠它区分「已成功 / 失败 / 已错过」
+            "last_ok": raw["last_ok"] if isinstance(raw.get("last_ok"), bool) else None,
             "last_attempt_key": str(raw.get("last_attempt_key") or ""),
             "last_run": str(raw.get("last_run") or ""),
         }
         if plan["goods_id"]:
             plans.append(plan)
     shop["plans"] = plans
+
+
+# 这几项只由服务端在执行兑换时写入。页面提交的配置可能是几秒前的旧快照，
+# 照单全收会把刚写好的执行结果、防重复触发的标记覆盖掉
+SHOP_PLAN_RUNTIME_FIELDS = ("last_result", "last_ok", "last_attempt_key", "last_run")
+# 结果属于某一个兑换时间点：用户把时间改了就是新的一轮，上一轮的结果不再适用
+SHOP_PLAN_RESULT_FIELDS = ("last_result", "last_ok", "last_run")
+
+
+def _plan_timestamp(plan: dict[str, Any]) -> int:
+    try:
+        return int(float(plan.get("exchange_at") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def preserve_shop_plan_runtime(old_config: dict[str, Any], new_config: dict[str, Any]) -> None:
+    """页面保存的配置里，执行结果一类的字段以服务端为准：
+    页面拿到的可能是兑换完成之前的旧快照，不能把刚写进去的结果盖掉。"""
+    old_plans = {
+        plan.get("id"): plan
+        for plan in (old_config.get("shop_exchange") or {}).get("plans") or []
+        if isinstance(plan, dict) and plan.get("id")
+    }
+    for plan in (new_config.get("shop_exchange") or {}).get("plans") or []:
+        old = old_plans.get(plan.get("id"))
+        if not old:
+            continue
+        rescheduled = _plan_timestamp(old) != _plan_timestamp(plan)
+        if not rescheduled and old.get("last_ok") is True and plan.get("last_ok") is not True:
+            # 成功后的停用也是运行结果，旧页面不能随保存其他设置把计划重新打开。
+            plan["enable"] = old.get("enable", False)
+        for key in SHOP_PLAN_RUNTIME_FIELDS:
+            if rescheduled and key in SHOP_PLAN_RESULT_FIELDS:
+                plan[key] = None if key == "last_ok" else ""
+            else:
+                plan[key] = old.get(key, plan.get(key))
+
+
+def find_shop_plan(config: dict[str, Any], plan_id: str) -> dict[str, Any] | None:
+    for plan in (config.get("shop_exchange") or {}).get("plans") or []:
+        if isinstance(plan, dict) and plan.get("id") == plan_id:
+            return plan
+    return None
 
 
 def normalize_cloud_game_tokens(value: Any) -> dict[str, str]:

@@ -14,13 +14,20 @@ import httpx
 from .. import constants as c
 
 LogFn = Callable[[str], None]
-RunPlanFn = Callable[[int], None]
+RunPlanFn = Callable[[str], None]
 
 PRECISE_WAIT_SECONDS = 180
 CHECK_INTERVAL_SECONDS = 0.1
 
+# 线程所处的阶段，界面用来解释「为什么还没动静」
+PHASE_WAITING = "waiting"
+PHASE_CALIBRATING = "calibrating"
+PHASE_PRECISE = "precise"
+
 
 class ExchangeScheduler:
+    """计划一律用 id 标识：下标会随删除、排序变化，正在执行的计划不能因此串号。"""
+
     def __init__(self, config: dict[str, Any], run_plan_fn: RunPlanFn, log_fn: LogFn) -> None:
         self.config = config
         self.run_plan_fn = run_plan_fn
@@ -28,8 +35,8 @@ class ExchangeScheduler:
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._workers: dict[str, PlanWorker] = {}
-        self._running_plans: set[int] = set()
-        self._progress: dict[int, dict[str, Any]] = {}
+        self._running_plans: set[str] = set()
+        self._progress: dict[str, dict[str, Any]] = {}
         self._last_error = ""
 
     def start(self) -> None:
@@ -48,48 +55,70 @@ class ExchangeScheduler:
     def status(self) -> dict[str, Any]:
         with self._lock:
             running_plans = sorted(self._running_plans)
-            running_progress = {str(i): dict(v) for i, v in self._progress.items()}
+            running_progress = {plan_id: dict(v) for plan_id, v in self._progress.items()}
             last_error = self._last_error
-            worker_count = len(self._workers)
+            workers = list(self._workers.values())
         next_plan = self._next_plan()
         return {
             "enabled": bool(self._shop_config().get("enable", False)),
             "running_plans": running_plans,
             "running_count": len(running_plans),
             "running_progress": running_progress,
-            "worker_count": worker_count,
+            "worker_count": len(workers),
+            "phases": {worker.plan_id: worker.phase for worker in workers},
             "next_run": format_ts(next_plan[1]) if next_plan else "",
+            "next_run_ts": next_plan[1] if next_plan else 0,
             "next_plan": next_plan[0] if next_plan else None,
+            "next_goods_name": next_plan[2] if next_plan else "",
             "last_error": last_error,
+            # 浏览器和服务器可能不在同一台机器上，页面按这个时间判断「还没到点 / 已错过」
+            "now": time.time(),
         }
 
-    def update_progress(self, index: int, *, attempt: int | None = None, message: str | None) -> None:
+    def begin(self, plan_id: str, goods_name: str = "") -> bool:
+        """登记一次兑换开始。该计划已经在兑换时返回 False，
+        避免定时触发和手动执行（或连点两次）同时下单。"""
+        with self._lock:
+            if plan_id in self._running_plans:
+                return False
+            self._running_plans.add(plan_id)
+            self._progress[plan_id] = self._initial_progress(plan_id, goods_name)
+            return True
+
+    def end(self, plan_id: str) -> None:
+        """登记兑换结束，同时清掉实时进度，使前端回落到最终结果展示。"""
+        with self._lock:
+            self._running_plans.discard(plan_id)
+            self._progress.pop(plan_id, None)
+
+    def update_progress(self, plan_id: str, *, attempt: int | None = None, message: str | None = None) -> None:
         """更新某条兑换计划的实时进度（并发安全，供 Web 层在重试过程中回调）。"""
         with self._lock:
-            entry = self._progress.setdefault(index, self._initial_progress(index))
+            entry = self._progress.get(plan_id)
+            if entry is None:
+                # 已经 end 的计划不再复活进度，否则界面会一直显示「兑换中」
+                return
             if attempt is not None:
                 entry["attempt"] = attempt
             if message is not None:
                 entry["message"] = message
 
-    def clear_progress(self, index: int) -> None:
-        """清除某条计划的实时进度，使前端回落到最终结果展示。"""
-        with self._lock:
-            self._progress.pop(index, None)
-
-    def _initial_progress(self, index: int) -> dict[str, Any]:
-        goods_name = f"计划 {index + 1}"
-        plans = self._shop_config().get("plans") or []
-        if 0 <= index < len(plans):
-            plan = plans[index]
-            if isinstance(plan, dict):
-                goods_name = str(plan.get("goods_name") or plan.get("goods_id") or goods_name)
+    def _initial_progress(self, plan_id: str, goods_name: str = "") -> dict[str, Any]:
+        if not goods_name:
+            plan = self._find_plan(plan_id)
+            goods_name = str((plan or {}).get("goods_name") or (plan or {}).get("goods_id") or "兑换计划")
         return {
             "goods_name": goods_name,
             "attempt": 0,
             "message": "准备兑换",
             "started_at": datetime.now().isoformat(timespec="seconds"),
         }
+
+    def _find_plan(self, plan_id: str) -> dict[str, Any] | None:
+        for plan in self._shop_config().get("plans") or []:
+            if isinstance(plan, dict) and plan.get("id") == plan_id:
+                return plan
+        return None
 
     def _rebuild_workers(self) -> None:
         if self._stop.is_set():
@@ -99,7 +128,7 @@ class ExchangeScheduler:
         if shop.get("enable", False):
             now = time.time()
             for index, plan in enumerate(shop.get("plans") or []):
-                if not isinstance(plan, dict):
+                if not isinstance(plan, dict) or not plan.get("id"):
                     continue
                 exchange_at = parse_ts(plan.get("exchange_at"))
                 if not plan.get("enable", True) or not plan.get("auto", True) or exchange_at <= 0:
@@ -156,31 +185,26 @@ class ExchangeScheduler:
                 continue
             worker.join(timeout=1)
 
-    def _run_worker_plan(self, index: int) -> None:
-        with self._lock:
-            self._running_plans.add(index)
-            self._progress.setdefault(index, self._initial_progress(index))
+    def _run_worker_plan(self, plan_id: str) -> None:
+        # begin / end 由 run_plan_fn 自己负责：它要在写完结果、发推送之前就结束进度
         try:
-            self.run_plan_fn(index)
+            self.run_plan_fn(plan_id)
             with self._lock:
                 self._last_error = ""
         except Exception as exc:
             with self._lock:
                 self._last_error = str(exc)
-            self.log(f"商品兑换计划 {index + 1} 执行失败: {exc}")
-        finally:
-            with self._lock:
-                self._running_plans.discard(index)
-                self._progress.pop(index, None)
+            self.log(f"商品兑换计划 {plan_id} 执行失败: {exc}")
 
-    def _next_plan(self) -> tuple[int, int] | None:
+    def _next_plan(self) -> tuple[str, int, str] | None:
+        """最近一个会自动触发的计划：(计划 id, 兑换时间, 商品名)。"""
         shop = self._shop_config()
         if not shop.get("enable", False):
             return None
         now = int(time.time())
-        candidates: list[tuple[int, int]] = []
-        for index, plan in enumerate(shop.get("plans") or []):
-            if not isinstance(plan, dict):
+        candidates: list[tuple[str, int, str]] = []
+        for plan in shop.get("plans") or []:
+            if not isinstance(plan, dict) or not plan.get("id"):
                 continue
             exchange_at = parse_ts(plan.get("exchange_at"))
             if not plan.get("enable", True) or not plan.get("auto", True) or exchange_at <= now:
@@ -188,7 +212,8 @@ class ExchangeScheduler:
             attempt_key = self._attempt_key(plan, exchange_at)
             if str(plan.get("last_attempt_key") or "") == attempt_key:
                 continue
-            candidates.append((index, exchange_at))
+            goods_name = str(plan.get("goods_name") or plan.get("goods_id") or "")
+            candidates.append((str(plan["id"]), exchange_at, goods_name))
         return min(candidates, key=lambda item: item[1]) if candidates else None
 
     def _shop_config(self) -> dict[str, Any]:
@@ -199,9 +224,9 @@ class ExchangeScheduler:
         return f"{plan.get('goods_id', '')}:{exchange_at}"
 
     def _worker_key(self, plan: dict[str, Any], exchange_at: int) -> str:
-        """生成计划线程唯一键，避免同商品同时间的多账号计划互相覆盖。"""
-        account_index = plan.get("account_index", 0)
-        return f"{account_index}:{self._attempt_key(plan, exchange_at)}"
+        """计划线程的唯一键：计划 id 加兑换时间。改了时间就换线程；
+        只换账号、地址时线程保留，执行时按 id 取最新的计划。"""
+        return f"{plan.get('id', '')}:{exchange_at}"
 
 
 class PlanWorker:
@@ -214,16 +239,18 @@ class PlanWorker:
         run_fn: RunPlanFn,
         log_fn: LogFn,
     ) -> None:
-        self.index = index
+        self.index = index  # 只用于日志里的序号，执行靠 plan_id
         self.plan = plan
+        self.plan_id = str(plan.get("id") or "")
         self.exchange_at = exchange_at
         self.attempt_key = attempt_key
         self.run_fn = run_fn
         self.log = log_fn
+        self.phase = PHASE_WAITING
         self._stop = threading.Event()
         self._thread = threading.Thread(
             target=self._loop,
-            name=f"miyouqian-exchange-plan-{index + 1}",
+            name=f"miyouqian-exchange-plan-{self.plan_id or index + 1}",
             daemon=True,
         )
 
@@ -248,19 +275,23 @@ class PlanWorker:
     def _loop(self) -> None:
         goods_name = self.plan.get("goods_name") or self.plan.get("goods_id") or f"计划 {self.index + 1}"
         target_text = format_ts(self.exchange_at)
+        self.phase = PHASE_CALIBRATING
         time_offset = sync_server_time_offset(self.log)
         now = lambda: time.time() + time_offset
         prewarm_at = max(self.exchange_at - PRECISE_WAIT_SECONDS, 0)
         self.log(f"商品兑换计划线程已创建: {goods_name}，目标时间 {target_text}")
+        self.phase = PHASE_WAITING
         if not wait_until(prewarm_at, self._stop, now):
             return
+        self.phase = PHASE_CALIBRATING
         time_offset = sync_server_time_offset(self.log)
         now = lambda: time.time() + time_offset
+        self.phase = PHASE_PRECISE
         self.log(f"商品兑换计划进入精确等待: {goods_name}，校准目标时间 {target_text}")
         while not self._stop.is_set():
             if now() >= self.exchange_at:
                 self.log(f"商品兑换计划到点触发: {goods_name}")
-                self.run_fn(self.index)
+                self.run_fn(self.plan_id)
                 return
             self._stop.wait(CHECK_INTERVAL_SECONDS)
 
