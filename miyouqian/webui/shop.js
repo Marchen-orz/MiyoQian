@@ -29,7 +29,7 @@ function shopNow() { return Date.now() / 1000 + shopServerOffset; }
 function shopPlans() { return config?.shop_exchange?.plans || []; }
 function shopPlanById(id) { return shopPlans().find((p) => p.id === id); }
 function markShopDirty() { shopRevision += 1; }
-function shopError(error) { showToast(error.message || String(error), "error"); }
+function shopError(error) { showToast(error.message || String(error)); }
 function shopIsRunning(id) {
   return shopQueuedRuns.has(id) || shopPendingRuns.has(id) || Boolean(shopRunningProgress[id]) || (shopScheduler.running_plans || []).includes(id);
 }
@@ -423,7 +423,7 @@ async function saveShopChanges(message = "兑换计划已保存") {
   renderShopPlans();
   try { await autoSaveConfig(); }
   finally { updateShopSelection(); }
-  showToast(message, "ok");
+  showToast(message);
 }
 async function addShopPlan(good) { return addShopPlans([good]); }
 async function addShopPlans(goods) {
@@ -483,7 +483,7 @@ async function addShopPlans(goods) {
   if (!result) return;
   renderShopPlans();
   const message = `已添加 ${result.added} 项，跳过重复 ${result.skipped} 项${result.errors.length ? `，失败 ${result.errors.length} 项：${result.errors.join("；")}` : ""}${config.shop_exchange.enable ? "" : "。自动兑换总开关已关闭，请按需开启"}`;
-  showToast(message, result.errors.length ? "warn" : "ok");
+  showToast(message);
 }
 async function exchangeGoodNow(good) {
   if (!canShopGoodExchangeNow(good)) throw new Error("商品当前不可立即兑换");
@@ -512,7 +512,7 @@ async function exchangePlanNow(planOrId, quiet = false) {
     const response = await api("/api/shop/exchange", { method: "POST", body: JSON.stringify(typeof planOrId === "string" ? { plan_id: planOrId } : { plan: planOrId }) });
     const result = response.result || {};
     if (response.config?.shop_exchange) mergeShopRuntime(response.config.shop_exchange);
-    if (!quiet) showToast(`${result.ok ? "兑换成功" : "兑换失败"}：${result.message || "未知结果"}（响应码 ${result.retcode ?? "-"}，请求 ${result.attempt || 0} 次）`, result.ok ? "ok" : "error");
+    if (!quiet) showToast(`${result.ok ? "兑换成功" : "兑换失败"}：${result.message || "未知结果"}（响应码 ${result.retcode ?? "-"}，请求 ${result.attempt || 0} 次）`);
     return result;
   } finally { shopPendingRuns.delete(id); await refreshStatus().catch(() => {}); renderShopPlans(false); }
 }
@@ -544,7 +544,7 @@ async function runShopPlans(ids) {
     }, 4);
   } finally { shopBatchRunning = false; ready.forEach((p) => shopQueuedRuns.delete(p.id)); renderShopPlans(false); updateShopSelection(); }
   const failed = results.filter((r) => !r.ok);
-  showToast(`执行完成：成功 ${results.length - failed.length} 项，失败 ${failed.length} 项${failed.length ? `。${failed.map((r) => `${r.name}：${r.message}`).join("；")}` : ""}`, failed.length ? "warn" : "ok");
+  showToast(`执行完成：成功 ${results.length - failed.length} 项，失败 ${failed.length} 项${failed.length ? `。${failed.map((r) => `${r.name}：${r.message}`).join("；")}` : ""}`);
 }
 async function shopMapLimit(items, action, concurrency = 4) {
   let cursor = 0;

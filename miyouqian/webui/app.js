@@ -149,10 +149,9 @@ async function api(path, options = {}) {
   return data;
 }
 
-function showToast(message, tone = "info") {
+function showToast(message) {
   const toast = $("toast");
   toast.textContent = message;
-  toast.dataset.tone = tone;
   toast.classList.add("show");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toast.classList.remove("show"), Math.min(15000, Math.max(2600, String(message).length * 90)));

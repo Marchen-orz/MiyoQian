@@ -2679,18 +2679,6 @@ textarea:focus {
   overflow-wrap: anywhere;
 }
 
-.toast[data-tone="error"] {
-  background: #ba3d3d;
-}
-
-.toast[data-tone="ok"] {
-  background: #24845b;
-}
-
-.toast[data-tone="warn"] {
-  background: #986516;
-}
-
 /* 开关放在 .form-grid 里时，不吃表单输入框的最小高度和内边距 */
 .shop-side .form-grid input[type="checkbox"] {
   width: 20px;
