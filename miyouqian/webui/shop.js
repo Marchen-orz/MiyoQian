@@ -21,7 +21,9 @@ const shopPendingRuns = new Set();
 const shopQueuedRuns = new Set();
 const shopMetaCache = new Map();
 const shopDetailCache = new Map();
+// 桌面一屏布局下每页数量由列表高度决定（见 renderShopGoods），其余布局用默认值。
 const SHOP_PAGE_SIZE = 4;
+let shopPageSize = SHOP_PAGE_SIZE;
 
 function shopNow() { return Date.now() / 1000 + shopServerOffset; }
 function shopPlans() { return config?.shop_exchange?.plans || []; }
@@ -186,11 +188,33 @@ function renderShopGoods() {
     return;
   }
   const filtered = getFilteredGoods();
-  shopCurrentPage = Math.max(1, Math.min(shopCurrentPage, Math.ceil(filtered.length / SHOP_PAGE_SIZE) || 1));
-  const start = (shopCurrentPage - 1) * SHOP_PAGE_SIZE;
-  list.innerHTML = filtered.length ? filtered.slice(start, start + SHOP_PAGE_SIZE).map((g) => shopGoodCard(g, shopGoods.indexOf(g))).join("") :
-    `<div class="empty-state shop-empty"><strong>暂无商品数据</strong><span>${shopFilterStatus ? "当前筛选条件下没有商品。" : "点击刷新商品后，会显示兑换时间、库存、价格和图片。"}</span></div>`;
+  const fitting = shopOneScreen();
+  let size = shopPageSize;
+  // 先按当前数量渲染并量出真实卡片高度，再按高度重算数量；翻页位置按第一张可见商品换算。
+  for (let pass = 0; pass < 3; pass++) {
+    shopCurrentPage = Math.max(1, Math.min(shopCurrentPage, Math.ceil(filtered.length / size) || 1));
+    const start = (shopCurrentPage - 1) * size;
+    list.classList.remove("is-full");
+    list.innerHTML = filtered.length ? filtered.slice(start, start + size).map((g) => shopGoodCard(g, shopGoods.indexOf(g))).join("") :
+      `<div class="empty-state shop-empty"><strong>暂无商品数据</strong><span>${shopFilterStatus ? "当前筛选条件下没有商品。" : "点击刷新商品后，会显示兑换时间、库存、价格和图片。"}</span></div>`;
+    const fit = fitting ? shopFitGoods(list) : 0;
+    if (!fit || fit === size) break;
+    shopCurrentPage = Math.floor(start / fit) + 1;
+    size = fit;
+  }
+  shopPageSize = size;
+  // 恰好排满一页时，不足一张的余量由卡片均分撑满；最后一页或商品很少时保持原高度。
+  list.classList.toggle("is-full", fitting && list.querySelectorAll(".shop-good").length === size);
   renderShopPagination();
+}
+function shopOneScreen() { return Boolean(globalThis.matchMedia?.("(min-width: 861px) and (min-height: 560px)").matches); }
+// 列表不滚动时能完整放下几张卡片（至少一张）；列表不可见时返回 0，保持现有数量。
+function shopFitGoods(list) {
+  const cards = [...list.querySelectorAll(".shop-good")];
+  if (!cards.length || !list.clientHeight) return 0;
+  const height = Math.max(...cards.map((card) => card.offsetHeight));
+  const gap = parseFloat(globalThis.getComputedStyle(list).rowGap) || 0;
+  return Math.max(1, Math.floor((list.clientHeight + gap) / (height + gap)));
 }
 function shopGoodCard(good, index) {
   const sold = isShopGoodSoldOut(good);
@@ -223,9 +247,10 @@ function renderShopPagination() {
     $("shopGoods").after(pager);
   }
   if (!pager) return;
-  const total = shopGoodsLoading ? 0 : Math.ceil(getFilteredGoods().length / SHOP_PAGE_SIZE);
-  pager.style.display = total > 1 ? "flex" : "none";
-  if (total <= 1) { pager.innerHTML = ""; return; }
+  const total = shopGoodsLoading ? 0 : Math.ceil(getFilteredGoods().length / shopPageSize);
+  // 只有一页时留一个看不见的占位按钮：一屏布局下分页栏高度不变，列表高度才不会随页数来回跳。
+  pager.classList.toggle("is-single", total <= 1);
+  if (total <= 1) { pager.innerHTML = `<button class="ghost page-btn" tabindex="-1" aria-hidden="true">1</button>`; return; }
   const current = shopCurrentPage;
   const arrow = (d) => `<svg width="10" height="10" viewBox="0 0 10 10"><path d="${d}" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>`;
   pager.innerHTML = `<button class="ghost page-btn" data-page="prev" ${current <= 1 ? "disabled" : ""}>${arrow("M7 1L3 5l4 4")}</button>` +
@@ -690,6 +715,14 @@ async function editShopPlan(id) {
 function bindShopEvents() {
   const on = (id, name, action) => $(id)?.addEventListener(name, action);
   on("shopStatusFilter", "change", (e) => { shopFilterStatus = e.target.value; shopCurrentPage = 1; renderShopGoods(); });
+  // 窗口大小变化或切到兑换页时，按新的列表高度重新分页。
+  if ($("shopGoods") && typeof ResizeObserver !== "undefined") {
+    let frame = 0;
+    new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => { if (shopOneScreen() && !shopGoodsLoading && $("shopGoods").clientHeight) renderShopGoods(); });
+    }).observe($("shopGoods"));
+  }
   on("shopRefreshBtn", "click", () => loadShopGoods().catch(shopError));
   on("shopGameFilter", "change", () => { shopCurrentPage = 1; loadShopGoods().catch(shopError); });
   on("shopPlanSelectAll", "change", (e) => { getFilteredPlans().forEach((p) => e.target.checked ? shopSelectedPlans.add(p.id) : shopSelectedPlans.delete(p.id)); renderShopPlans(); });

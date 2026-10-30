@@ -132,6 +132,10 @@ body {
   user-select: none;
 }
 
+.shop-pagination.is-single {
+  display: none;
+}
+
 button,
 input,
 textarea {
@@ -2121,6 +2125,17 @@ textarea:focus {
     overflow-y: auto;
     padding-right: 2px;
     scrollbar-width: thin;
+  }
+
+  /* 每页数量按列表高度算出：恰好排满时，不足一张的余量由卡片均分撑满 */
+  .shop-view .shop-goods.is-full {
+    grid-auto-rows: 1fr;
+  }
+
+  /* 只有一页时分页栏也占位（隐藏），列表高度不随页数变化 */
+  .shop-view .shop-pagination.is-single {
+    display: flex;
+    visibility: hidden;
   }
 }
 
