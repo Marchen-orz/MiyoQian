@@ -47,7 +47,7 @@ from ..core.qq_bot import generate_verify_code
 from ..core.region import REGION_CN, REGION_OS, account_region
 from ..overseas.checkin import probe_hoyolab_cookie
 from ..overseas.cookie import parse_hoyolab_cookie
-from ..tasks.shop_exchange import ShopExchange
+from ..tasks.shop_exchange import BJT, ShopExchange
 from .exchange_scheduler import ExchangeScheduler
 from .notifier import send_push, send_task_push, send_exchange_push, push_channels
 from .runner import run_tasks
@@ -89,6 +89,10 @@ def check_password(password: str, stored_hash: str) -> bool:
 
 def is_external_host(host: str) -> bool:
     return host not in ("127.0.0.1", "localhost", "::1")
+
+
+# 兑换失败后读取下次开抢时间的尝试次数（两次之间隔 1 秒）
+NEXT_TIME_LOOKUP_TRIES = 3
 
 
 def summarize_exchange_result(result: dict[str, Any]) -> str:
@@ -580,15 +584,27 @@ class WebApp:
             except Exception as exc:
                 error = exc
                 result = {"ok": False, "retcode": None, "message": f"异常: {exc}", "attempt": 0, "error": True}
+            next_at = 0
+            if not manual and not result.get("ok") and not result.get("error"):
+                # 定时兑换没成（不是程序异常）：商品若还有下一次开抢，计划就续到那个时间
+                self.exchange_scheduler.update_progress(plan_id, message="正在读取下次兑换时间")
+                next_at = self._lookup_next_exchange_at(plan, goods_name)
             summary = summarize_exchange_result(result)
             with self.lock:
                 live = find_shop_plan(self.config, plan_id)
                 if live is not None:
-                    live["last_result"] = summary
                     live["last_ok"] = bool(result.get("ok"))
                     live["last_run"] = datetime.now().isoformat(timespec="seconds")
                     if result.get("ok"):
                         live["enable"] = False
+                    elif next_at and self._can_roll_plan(live, plan):
+                        # 期间页面把时间改了或暂停了就不动，以用户的为准
+                        live["exchange_at"] = next_at
+                        live["auto_rolls"] = int(live.get("auto_rolls") or 0) + 1
+                        result["rescheduled_to"] = next_at
+                        result["rescheduled_text"] = datetime.fromtimestamp(next_at, BJT).strftime("%Y-%m-%d %H:%M:%S")
+                        summary = f"{summary}；已顺延到 {result['rescheduled_text']}"
+                    live["last_result"] = summary
                     save_config(self.config_path, self.config)
         finally:
             self.exchange_scheduler.end(plan_id)
@@ -600,6 +616,36 @@ class WebApp:
         if error is not None:
             raise error
         return result
+
+    def _can_roll_plan(self, live: dict[str, Any], ran: dict[str, Any]) -> bool:
+        """顺延前再确认一次：计划还在自动执行，且时间还是刚才跑的那个。"""
+        return (
+            live.get("enable") is not False
+            and live.get("auto") is not False
+            and int(live.get("exchange_at") or 0) == int(ran.get("exchange_at") or 0)
+        )
+
+    def _lookup_next_exchange_at(self, plan: dict[str, Any], goods_name: str) -> int:
+        """重新读商品详情里的下次开抢时间。商品没有下一次、或始终读不到时返回 0，计划照常停下。"""
+        goods_id = str(plan.get("goods_id") or "")
+        with self.lock:
+            config = copy.deepcopy(self.config)
+        for attempt in range(1, NEXT_TIME_LOOKUP_TRIES + 1):
+            try:
+                with ApiClient(timeout=10.0) as client:
+                    detail = ShopExchange(client, config).good_detail(goods_id)
+            except Exception as exc:
+                self.log(f"读取下次兑换时间失败（第 {attempt} 次）: {goods_name}，{exc}", "exchange")
+                if attempt < NEXT_TIME_LOOKUP_TRIES:
+                    time.sleep(1)
+                continue
+            next_at = int(detail.get("exchange_timestamp") or 0)
+            # 只认比这次兑换时间和此刻都晚的时间，否则就是已经过去的开抢点
+            if next_at > max(int(plan.get("exchange_at") or 0), int(time.time())):
+                return next_at
+            self.log(f"商品暂无下次兑换时间，不再顺延: {goods_name}", "exchange")
+            return 0
+        return 0
 
     def _send_exchange_push(self, goods_name: str, result: dict[str, Any], plan: dict[str, Any]) -> None:
         """发送商品兑换结果推送"""

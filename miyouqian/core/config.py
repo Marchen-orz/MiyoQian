@@ -245,6 +245,7 @@ def normalize_shop_exchange(config: dict[str, Any]) -> None:
             "last_ok": raw["last_ok"] if isinstance(raw.get("last_ok"), bool) else None,
             "last_attempt_key": str(raw.get("last_attempt_key") or ""),
             "last_run": str(raw.get("last_run") or ""),
+            "auto_rolls": max(parse_int(raw.get("auto_rolls"), 0), 0),
         }
         if plan["goods_id"]:
             plans.append(plan)
@@ -265,6 +266,10 @@ def _plan_timestamp(plan: dict[str, Any]) -> int:
         return 0
 
 
+def _plan_rolls(plan: dict[str, Any]) -> int:
+    return parse_int(plan.get("auto_rolls"), 0)
+
+
 def preserve_shop_plan_runtime(old_config: dict[str, Any], new_config: dict[str, Any]) -> None:
     """页面保存的配置里，执行结果一类的字段以服务端为准：
     页面拿到的可能是兑换完成之前的旧快照，不能把刚写进去的结果盖掉。"""
@@ -277,6 +282,11 @@ def preserve_shop_plan_runtime(old_config: dict[str, Any], new_config: dict[str,
         old = old_plans.get(plan.get("id"))
         if not old:
             continue
+        if _plan_rolls(old) > _plan_rolls(plan):
+            # 服务端在兑换失败后已经把时间顺延到了下一次，页面还停在顺延之前：
+            # 它带来的旧时间不是用户改的，整条以服务端为准，不然顺延会被改回去、结果也被清掉
+            plan["exchange_at"] = old.get("exchange_at", plan.get("exchange_at"))
+            plan["auto_rolls"] = old.get("auto_rolls", 0)
         rescheduled = _plan_timestamp(old) != _plan_timestamp(plan)
         if not rescheduled and old.get("last_ok") is True and plan.get("last_ok") is not True:
             # 成功后的停用也是运行结果，旧页面不能随保存其他设置把计划重新打开。

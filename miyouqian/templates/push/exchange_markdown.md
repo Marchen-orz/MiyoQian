@@ -7,7 +7,7 @@
 > 👤 **账号：**{{account_name_text}}
 {{role_line_markdown}}> 🔄 **尝试次数：**{{attempt}} 次
 > 📊 **结果：**{{message_text}}（{{retcode_text}}）
-> ⏰ **时间：**{{time}}
+> ⏰ **时间：**{{time}}{{reschedule_line_markdown}}
 
 ---
 

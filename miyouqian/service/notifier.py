@@ -586,6 +586,9 @@ def build_exchange_template_context(
     attempt = result.get("attempt", 1)
     # 虚拟商品才有游戏角色，实体商品没有这一行
     role = " / ".join(part for part in (plan.get("role_name"), plan.get("uid")) if part)
+    # 失败后计划已自动续到商品的下一次开抢时，多说明一句
+    rescheduled = str(result.get("rescheduled_text") or "")
+    reschedule_note = f"🔁 已自动顺延到下次兑换时间 {rescheduled}，届时会继续尝试。" if rescheduled else ""
 
     # 商品信息
     price = plan.get("price", 0)
@@ -625,6 +628,14 @@ def build_exchange_template_context(
         "role_line_text": f"角色：{role}\n" if role else "",
         "role_line_markdown": f"> 🎮 **角色：**{role}\n" if role else "",
         "role_line_html": f"🎮 <b>角色：</b>{html.escape(role)}\n" if role else "",
+        "reschedule_line_text": f"\n{reschedule_note}" if reschedule_note else "",
+        "reschedule_line_markdown": f"\n> {reschedule_note}" if reschedule_note else "",
+        "reschedule_line_html": f"\n{html.escape(reschedule_note)}" if reschedule_note else "",
+        "reschedule_note_html": (
+            f'<div style="font-size:13px;margin-top:8px;color:#102033;">{html.escape(reschedule_note)}</div>'
+            if reschedule_note
+            else ""
+        ),
     }
 
 

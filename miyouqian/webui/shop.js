@@ -365,7 +365,7 @@ async function buildShopPlan(good, accountIndex, exchangeAt = null) {
     enable: true, auto: true, account_index: accountIndex, account_stuid: String(config.accounts[accountIndex]?.stuid || ""),
     goods_id: String(base.goods_id || good.goods_id), goods_name: base.goods_name, icon: base.icon || "", price: base.price,
     stock: base.stock, type: Number(base.type || 0), exchange_at: at, game: base.game || "", game_biz: base.game_biz || "",
-    device_fp: fp.device_fp || "", uid: "", region: "", role_name: "", region_name: "", address_id: "", last_result: "", last_ok: null, last_attempt_key: "", last_run: "" };
+    device_fp: fp.device_fp || "", uid: "", region: "", role_name: "", region_name: "", address_id: "", last_result: "", last_ok: null, last_attempt_key: "", last_run: "", auto_rolls: 0 };
   if (plan.type === 2 && !plan.game_biz) throw new Error("商品详情缺少 game_biz，无法匹配游戏角色");
   const currentIndex = config.accounts.findIndex((a) => !isOverseas(a) && String(a.stuid || "") === accountStuid);
   return bindShopPlanAccount(plan, currentIndex);
@@ -612,6 +612,11 @@ function mergeShopRuntime(remote) {
   const byId = new Map((remote.plans || []).map((p) => [p.id, p]));
   shopPlans().forEach((plan) => {
     const latest = byId.get(plan.id);
+    if (latest && Number(latest.auto_rolls || 0) > Number(plan.auto_rolls || 0)) {
+      // 兑换失败后服务端已把时间顺延到商品的下一次开抢，连同这次的失败结果一起采用
+      for (const key of ["exchange_at", "auto_rolls", "last_result", "last_ok", "last_attempt_key", "last_run"]) if (key in latest) plan[key] = latest[key];
+      return;
+    }
     if (!latest || Number(latest.exchange_at || 0) !== Number(plan.exchange_at || 0)) return;
     if (plan.last_run && (!latest.last_run || latest.last_run < plan.last_run)) return;
     const changed = latest.last_run !== plan.last_run || latest.last_ok !== plan.last_ok;
