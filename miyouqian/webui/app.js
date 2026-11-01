@@ -49,6 +49,7 @@ const pushChannelIconFiles = {
 // 和后端 config.py 的 PUSH_CHANNEL_DEFAULTS 一一对应（这里的值统一是字符串），测试会校验两边一致
 const pushChannelDefaults = {
   qqbot: { message_format: "text" },
+  qq: { protocol: "nap" },
   gotify: { priority: "5" },
 };
 
@@ -849,6 +850,7 @@ function pushChannelFields(provider, channel) {
     access_token: channel.access_token || "",
     send_id: channel.send_id || "",
     msg_type: channel.msg_type || "",
+    protocol: channel.protocol || pushChannelDefaults.qq.protocol,
     app_id: channel.app_id || "",
     client_secret: channel.client_secret || "",
     user_openid: channel.user_openid || "",
@@ -916,7 +918,8 @@ function pushChannelFields(provider, channel) {
       field("push_url", "HTTP API", "text"),
       field("access_token", "Access Token", "text"),
       field("send_id", "Group ID / User ID", "text"),
-      selectBox("msg_type", "推送方式", { group: "QQ群", private: "私信" })
+      selectBox("msg_type", "推送目标", { group: "QQ群", private: "私信" }),
+      selectBox("protocol", "框架协议（请根据后端机器人框架选择）", { nap: "Napcat", sl: "SnowLuma" }),
     ],
     qqbot: [
       field("app_id", "AppID"),
@@ -1143,7 +1146,7 @@ function pushChannelFieldNames(provider) {
   const fields = {
     pushplus: ["token", "topic"],
     serverchan: ["sendkey", "uid"],
-    qq: ["push_url", "access_token", "send_id", "msg_type"],
+    qq: ["push_url", "access_token", "send_id", "msg_type", "protocol"],
     qqbot: ["app_id", "client_secret", "user_openid", "group_openid", "message_format", "api_base"],
     telegram: ["token", "chat_id", "api_url"],
     dingrobot: ["webhook", "secret"],

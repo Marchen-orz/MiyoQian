@@ -16,6 +16,7 @@ from datetime import datetime
 from email.message import EmailMessage
 from typing import Any, Callable, Optional
 from urllib.parse import quote_plus
+
 from ..core.config import normalize_gotify_priority
 from ..core.onebot import OneBotHTTP
 from ..core.qq_bot import QQBot
@@ -137,6 +138,7 @@ def _send_exchange(
     access_token = str(push.get("access_token") or "").strip()
     send_id = str(push.get("send_id") or "").strip()
     msg_type = str(push.get("msg_type") or "").strip()
+    protocol = str(push.get("protocol") or "").strip().lower()
 
     smtp_host = str(push.get("smtp_host") or "").strip()
     smtp_port = int(push.get("smtp_port") or 465)
@@ -188,18 +190,29 @@ def _send_exchange(
         require(send_id, "send_id")
         require(msg_type, "msg_type")
         if msg_type == "group":
-            message_type = 'group'
+            message_type = "group"
             user_id = None
             group_id = send_id
         elif msg_type == "private":
-            message_type = 'private'
+            message_type = "private"
             user_id = send_id
             group_id = None
+        else:
+            raise ValueError("msg_type must be 'group' or 'private'")
 
         text = build_exchange_text(title, goods_name, result, plan, success)
-        bot = OneBotHTTP(base_url=push_url, access_token=access_token)
+        bot = OneBotHTTP(
+            base_url=push_url,
+            access_token=access_token,
+            protocol=protocol,
+        )
         try:
-            bot.send_msg(user_id=user_id, group_id=group_id, message=text, message_type=message_type)
+            bot.send_msg(
+                user_id=user_id,
+                group_id=group_id,
+                message=text,
+                message_type=message_type,
+            )
         except Exception as ex:
             raise ValueError(f"QQ推送通道暂不可用，{ex}")
         return
@@ -291,6 +304,7 @@ def _send(client: httpx.Client, provider: str, push: dict[str, Any], title: str,
     access_token = str(push.get("access_token") or "").strip()
     send_id = str(push.get("send_id") or "").strip()
     msg_type = str(push.get("msg_type") or "").strip()
+    protocol = str(push.get("protocol") or "").strip().lower()
 
     smtp_host = str(push.get("smtp_host") or "").strip()
     smtp_port = int(push.get("smtp_port") or 465)
@@ -309,13 +323,15 @@ def _send(client: httpx.Client, provider: str, push: dict[str, Any], title: str,
         require(msg_type, "msg_type")
         # 消息类型
         if msg_type == "group":
-            message_type = 'group'
+            message_type = "group"
             user_id = None
             group_id = send_id
         elif msg_type == "private":
-            message_type = 'private'
+            message_type = "private"
             user_id = send_id
             group_id = None
+        else:
+            raise ValueError("msg_type must be 'group' or 'private'")
 
         lines = message.splitlines()
 
@@ -334,9 +350,18 @@ def _send(client: httpx.Client, provider: str, push: dict[str, Any], title: str,
                 continue
             filtered.append(line)
 
-        bot = OneBotHTTP(base_url = push_url, access_token = access_token)
+        bot = OneBotHTTP(
+            base_url=push_url,
+            access_token=access_token,
+            protocol=protocol,
+        )
         try:
-            bot.send_msg(user_id = user_id, group_id = group_id, message = '\n'.join(filtered), message_type = message_type)
+            bot.send_msg(
+                user_id=user_id,
+                group_id=group_id,
+                message="\n".join(filtered),
+                message_type=message_type,
+            )
         except Exception as ex:
             raise ValueError(f"QQ推送通道暂不可用，{ex}")
         return
