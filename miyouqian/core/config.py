@@ -329,7 +329,7 @@ PUSH_CHANNEL_FIELDS: dict[str, tuple[str, ...]] = {
     "pushplus": ("token", "topic"),
     # Server酱³（sc3.ft07.com）：SendKey 形如 sctp1234tXXXX，uid 可留空（会从 SendKey 前缀解析）
     "serverchan": ("sendkey", "uid"),
-    "qq": ("push_url", "access_token", "send_id", "msg_type"),
+    "qq": ("push_url", "access_token", "send_id", "msg_type", "protocol"),
     # QQ 开放平台官方机器人：与上面的 onebot 版 qq 通道无关，
     # user_openid / group_openid 只能通过 Web 控制台的「绑定」按钮获取
     "qqbot": ("app_id", "client_secret", "user_openid", "group_openid", "message_format", "api_base"),
@@ -345,6 +345,7 @@ PUSH_CHANNEL_FIELDS: dict[str, tuple[str, ...]] = {
 # Web 控制台的 app.js 里有一份对应的 pushChannelDefaults，测试会校验两边一致。
 PUSH_CHANNEL_DEFAULTS: dict[str, dict[str, Any]] = {
     "qqbot": {"message_format": "text"},
+    "qq": {"protocol": "nap"},
     "gotify": {"priority": 5},
 }
 
