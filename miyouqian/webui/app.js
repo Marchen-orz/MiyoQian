@@ -85,8 +85,6 @@ const bbsForumOptions = [
   ["9", "崩坏：因缘精灵"]
 ];
 const defaultBbsForums = ["5", "2"];
-const bbsInteractionDisabledReason =
-    "米游社改版，社区互动已无法获取米游币，待新获取方式更新~";
 
 // 任务配置里的三个模块，和推送通道一样用按钮 + 弹窗
 const taskModules = [
@@ -249,7 +247,6 @@ function updateTaskDependencyState() {
   const gameToggle = $("gameCheckin");
   const cloudToggle = $("cloudGameCheckin");
   const bbsToggle = $("bbsTasks");
-  const bbsCheckin = $("bbsCheckin");
 
   if (gameToggle) {
     setTaskGroupDisabled("gameTaskGroup", "[data-game]", !gameToggle.checked);
@@ -262,12 +259,14 @@ function updateTaskDependencyState() {
     );
   }
   if (bbsToggle) {
-    setTaskGroupDisabled("bbsTaskGroup", "#bbsCheckin", !bbsToggle.checked);
-  }
-  if (bbsToggle && bbsCheckin) {
-    const forumsEnabled = bbsToggle.checked && bbsCheckin.checked;
-    $("bbsForumChips")?.classList.toggle("is-hidden", !forumsEnabled);
-    setTaskGroupDisabled("bbsTaskGroup", "[data-bbs-forum]", !forumsEnabled);
+    setTaskGroupDisabled(
+      "bbsTaskGroup",
+      "#bbsCheckin, #bbsRead, #bbsLike, #bbsShare",
+      !bbsToggle.checked,
+    );
+    // 看帖 / 点赞 / 分享也要用版块列表，所以只要米游币任务开着就显示
+    $("bbsForumChips")?.classList.toggle("is-hidden", !bbsToggle.checked);
+    setTaskGroupDisabled("bbsTaskGroup", "[data-bbs-forum]", !bbsToggle.checked);
   }
 
   updateAccountCloudGameInputs();
@@ -653,15 +652,6 @@ async function savePushChannel() {
 // ---------------------------------------------------------------------------
 // 任务配置弹窗：游戏社区签到 / 云游戏签到 / 米游币任务
 // ---------------------------------------------------------------------------
-function bbsInteractionToggle(label) {
-  return `
-    <label class="choice-toggle is-disabled" title="${escapeAttr(bbsInteractionDisabledReason)}">
-      <input type="checkbox" disabled />
-      <span>${label}</span>
-    </label>
-  `;
-}
-
 function openTaskModal(kind) {
   if (!kind) return;
   if (taskModalEl) closeTaskModal();
@@ -766,9 +756,18 @@ function renderTaskModalBody() {
           <input id="bbsCheckin" type="checkbox" ${config.bbs?.checkin !== false ? "checked" : ""} />
           <span>社区签到</span>
         </label>
-        ${bbsInteractionToggle("点赞")}
-        ${bbsInteractionToggle("看帖")}
-        ${bbsInteractionToggle("分享")}
+        <label class="choice-toggle">
+          <input id="bbsRead" type="checkbox" ${config.bbs?.read ? "checked" : ""} />
+          <span>看帖</span>
+        </label>
+        <label class="choice-toggle">
+          <input id="bbsLike" type="checkbox" ${config.bbs?.like ? "checked" : ""} />
+          <span>点赞</span>
+        </label>
+        <label class="choice-toggle">
+          <input id="bbsShare" type="checkbox" ${config.bbs?.share ? "checked" : ""} />
+          <span>分享</span>
+        </label>
       </div>
       <div class="choice-toggles cols-3" id="bbsForumChips"></div>
     </div>
@@ -812,13 +811,13 @@ async function saveTaskModal() {
   } else {
     config.features.bbs_tasks = Boolean($("bbsTasks")?.checked);
     config.bbs.checkin = Boolean($("bbsCheckin")?.checked);
+    config.bbs.read = Boolean($("bbsRead")?.checked);
+    config.bbs.like = Boolean($("bbsLike")?.checked);
+    config.bbs.share = Boolean($("bbsShare")?.checked);
     config.bbs.forums = checkedInputValues(
       "[data-bbs-forum]",
       (input) => Number(input.dataset.bbsForum),
     );
-    config.bbs.read = false;
-    config.bbs.like = false;
-    config.bbs.share = false;
   }
   try {
     await autoSaveConfig();
@@ -1873,12 +1872,7 @@ function collectConfig() {
   config.features = config.features || {};
   config.games = config.games || {};
   config.cloud_games = config.cloud_games || {};
-  config.bbs = {
-    ...(config.bbs || {}),
-    read: false,
-    like: false,
-    share: false,
-  };
+  config.bbs = { ...(config.bbs || {}) };
   // 「仅失败时推送」在通道弹窗里改，值直接维护在 config 上，不再从 DOM 读
   config.push = config.push || {};
   // 通道参数在弹窗里编辑、保存时写回内存，这里只做规整和过滤，

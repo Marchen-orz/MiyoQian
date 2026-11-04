@@ -178,9 +178,8 @@ def normalize_config(config: dict[str, Any]) -> None:
     else:
         forums = list(DEFAULT_CONFIG["bbs"]["forums"])
     bbs["forums"] = forums
-    bbs["read"] = False
-    bbs["like"] = False
-    bbs["share"] = False
+    for key in ("read", "like", "share"):
+        bbs[key] = parse_bool(bbs.get(key, False))
     normalize_shop_exchange(config)
 
 
