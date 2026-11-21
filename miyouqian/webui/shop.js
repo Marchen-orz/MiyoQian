@@ -51,7 +51,7 @@ function shopPlanState(plan) {
   if (plan.last_ok === true) return { key: "done", label: "已成功", tone: "ok" };
   if (plan.enable === false || plan.auto === false) return { key: "paused", label: "已暂停", tone: "paused" };
   if ((Number(plan.type) === 1 && !plan.address_id) || (Number(plan.type) === 2 && (!plan.uid || !plan.region || !plan.game_biz))) return { key: "unset", label: "收货信息待补全", tone: "warn" };
-  if (plan.last_ok === false) return { key: "failed", label: Number(plan.exchange_at) > shopNow() && String(plan.last_attempt_key || "") !== `${plan.goods_id}:${Number(plan.exchange_at)}` && config?.shop_exchange?.enable ? "上次失败 · 仍待定时" : "兑换失败", tone: "danger" };
+  if (plan.last_ok === false) return { key: "failed", label: Number(plan.exchange_at) > shopNow() && String(plan.last_attempt_key || "") !== `${plan.goods_id}:${Number(plan.exchange_at)}` && config?.shop_exchange?.enable ? "上次失败 · 到点重试" : "兑换失败", tone: "danger" };
   const at = Number(plan.exchange_at || 0);
   if (!at) return { key: "unset", label: "未设时间", tone: "warn" };
   if (String(plan.last_attempt_key || "") === `${plan.goods_id}:${at}`) return { key: "missed", label: "本轮已执行", tone: "warn" };
