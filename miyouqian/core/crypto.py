@@ -43,6 +43,13 @@ def ds_x4(query: str = "", body: str = "") -> str:
     return f"{t},{r},{sign}"
 
 
+def ds_exchange(body: str) -> str:
+    t = str(int(time.time()))
+    r = random_text(6)
+    sign = md5(f"salt={c.PASSPORT_EXCHANGE_SALT}&t={t}&r={r}&b={body}&q=")
+    return f"{t},{r},{sign}"
+
+
 def ds_app(body: str = "", query: str = "") -> str:
     t = str(int(time.time()))
     r = str(random.randint(100001, 200000))

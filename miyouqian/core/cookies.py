@@ -41,24 +41,13 @@ def stoken_cookie(account: dict[str, Any]) -> str:
 
 
 def build_cookie(uid: str, mid: str, ltoken: str, cookie_token: str) -> str:
+    """国服网页 cookie，只放 V2 凭证：ltoken / cookie_token 是 stoken 换出来的 ltoken_v2 / cookie_token_v2。"""
     parts = [
-        f"account_id={uid}",
         f"account_id_v2={uid}",
         f"account_mid_v2={mid}",
-        f"cookie_token={cookie_token}",
+        f"cookie_token_v2={cookie_token}",
         f"ltmid_v2={mid}",
-        f"ltoken={ltoken}",
-        f"ltuid={uid}",
+        f"ltoken_v2={ltoken}",
         f"ltuid_v2={uid}",
-        f"login_uid={uid}",
     ]
     return "; ".join(parts)
-
-
-def replace_or_append_cookie_value(cookie: str, key: str, value: str) -> str:
-    if not cookie:
-        return f"{key}={value}"
-    pattern = rf"((?:^|;\s*){re.escape(key)}=)([^;]*)"
-    if re.search(pattern, cookie):
-        return re.sub(pattern, rf"\g<1>{value}", cookie, count=1)
-    return f"{cookie.rstrip('; ')}; {key}={value}"

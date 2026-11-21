@@ -9,6 +9,7 @@ import os
 import pathlib
 import threading
 import time
+import uuid
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -38,6 +39,12 @@ _RSA_MODULUS = int(
 _RSA_EXPONENT = 65537
 _RSA_KEY_BYTES = 128
 
+# 通行证换票接口的 token 类型
+TOKEN_TYPE_STOKEN = 1
+TOKEN_TYPE_LTOKEN = 2
+TOKEN_TYPE_COOKIE_TOKEN = 4
+_LIFECYCLE_ID = str(uuid.uuid4())
+
 
 def passport_rsa_encrypt(text: str) -> str:
     data = text.encode("utf-8")
@@ -66,45 +73,40 @@ class PassportLogin:
         return {"x-rpc-device_fp": self.device_fp} if self.device_fp else {}
 
     def get_additional_tokens(self, stoken: str, mid: str) -> dict[str, str]:
-        ltoken = self._get_ltoken(stoken, mid)
-        cookie_token = self._get_cookie_token(stoken, mid)
+        """用 v2 stoken 换 ltoken_v2（365 天）和 cookie_token_v2（48 小时）。"""
+        ltoken = self._exchange_token(stoken, mid, TOKEN_TYPE_LTOKEN, "ltoken_v2")
+        cookie_token = self._exchange_token(stoken, mid, TOKEN_TYPE_COOKIE_TOKEN, "cookie_token_v2")
         return {"ltoken": ltoken, "cookie_token": cookie_token}
 
-    def _passport_headers(self, stoken: str, mid: str) -> dict[str, str]:
+    def _exchange_headers(self, body: str) -> dict[str, str]:
         return {
-            "user-agent": f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) miHoYoBBS/{c.BBS_VERSION}",
+            "content-type": "application/json",
+            "DS": crypto.ds_exchange(body),
+            "user-agent": devicelib.mobile_ua(self.device),
             "x-rpc-app_version": c.BBS_VERSION,
-            "x-rpc-client_type": "5",
-            "x-requested-with": "com.mihoyo.hyperion",
-            "referer": "https://webstatic.mihoyo.com",
+            "x-rpc-client_type": "2",
+            "x-rpc-app_id": c.PASSPORT_APP_ID,
             "x-rpc-device_id": self.device_id,
             **self._fp_header(),
-            "cookie": f"mid={mid};stoken={stoken}",
+            "x-rpc-device_name": self.device_name,
+            "x-rpc-device_model": self.device_model,
+            "x-rpc-game_biz": "bbs_cn",
+            "x-rpc-sdk_version": c.PASSPORT_SDK_VERSION,
+            "x-rpc-account_version": c.PASSPORT_SDK_VERSION,
+            "x-rpc-lifecycle_id": _LIFECYCLE_ID,
         }
 
-    def _get_ltoken(self, stoken: str, mid: str) -> str:
-        headers = self._passport_headers(stoken, mid)
-        headers["ds"] = crypto.ds_x4(query=f"stoken={stoken}")
-        data = self.client.get_json(
-            c.LTOKEN_BY_STOKEN_URL,
-            headers=headers,
-            params={"stoken": stoken},
+    def _exchange_token(self, stoken: str, mid: str, token_type: int, label: str) -> str:
+        body = json.dumps(
+            {"dst_token_type": token_type, "src_token": {"token": stoken, "token_type": TOKEN_TYPE_STOKEN}, "mid": mid},
+            separators=(",", ":"),
         )
-        ensure_ok(data, "stoken 换 ltoken 失败")
-        return str(data.get("data", {}).get("ltoken") or "")
-
-    def _get_cookie_token(self, stoken: str, mid: str) -> str:
-        headers = self._passport_headers(stoken, mid)
-        headers["ds"] = crypto.ds_x4(query=f"stoken={stoken}")
-        headers["x-rpc-client_type"] = "2"
-        headers["x-rpc-aigis"] = ""
-        data = self.client.get_json(
-            c.COOKIE_TOKEN_BY_STOKEN_URL,
-            headers=headers,
-            params={"stoken": stoken},
-        )
-        ensure_ok(data, "stoken 换 cookie_token 失败")
-        return str(data.get("data", {}).get("cookie_token") or "")
+        data = self.client.post_json(c.TOKEN_EXCHANGE_URL, content=body, headers=self._exchange_headers(body))
+        ensure_ok(data, f"stoken 换 {label} 失败")
+        token = str(((data.get("data") or {}).get("token") or {}).get("token") or "")
+        if not token:
+            raise RuntimeError(f"stoken 换 {label} 失败: 接口未返回 token")
+        return token
 
 
 class QRLogin(PassportLogin):
@@ -263,30 +265,20 @@ def print_qrcode(text: str, image_path: pathlib.Path | None = None) -> None:
 
 
 def refresh_cookie_token(client: ApiClient, account: dict[str, Any], device: dict[str, Any] | None = None) -> bool:
+    """用 v2 stoken 重新换一组 V2 凭证并重建整条 cookie，旧版 V1 cookie 也顺带迁成 V2。
+
+    v1 stoken 换不了 V2 凭证，只能重新扫码登录。"""
+    cookie = str(account.get("cookie") or "")
     stoken = str(account.get("stoken") or "")
-    mid = str(account.get("mid") or cookies.guess_mid(str(account.get("cookie") or "")))
-    token = ""
-    # takumi 的刷新接口在部分环境返回 -464，v2 stoken 优先走 passport，两边签发的是同一个 cookie_token
-    if stoken.startswith("v2_") and mid:
-        try:
-            token = PassportLogin(client, device or {})._get_cookie_token(stoken, mid)
-        except Exception:
-            token = ""
-    if not token:
-        try:
-            data = client.get_json(
-                c.COOKIE_TOKEN_REFRESH_URL,
-                headers={"cookie": cookies.stoken_cookie(account), "user-agent": devicelib.mobile_ua(device or {})},
-            )
-            ensure_ok(data, "刷新 cookie_token 失败")
-        except Exception:
-            return False
-        token = str(data.get("data", {}).get("cookie_token") or "")
-    if not token:
+    mid = str(account.get("mid") or cookies.guess_mid(cookie))
+    uid = str(account.get("stuid") or cookies.guess_uid(cookie))
+    if not stoken.startswith("v2_") or not mid or not uid:
         return False
-    account["cookie"] = cookies.replace_or_append_cookie_value(
-        str(account.get("cookie") or ""), "cookie_token", token
-    )
+    try:
+        tokens = PassportLogin(client, device or {}).get_additional_tokens(stoken, mid)
+    except Exception:
+        return False
+    account["cookie"] = cookies.build_cookie(uid, mid, tokens["ltoken"], tokens["cookie_token"])
     return True
 
 

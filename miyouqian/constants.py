@@ -1,15 +1,19 @@
 # -*- coding: utf-8 -*-
 """接口常量与业务映射。"""
 
+from typing import Any
+
 BBS_VERSION = "2.106.2"
 QR_LOGIN_VERSION = "2.102.1"
 PASSPORT_APP_VERSION = "2.90.1"
+PASSPORT_SDK_VERSION = "2.44.0"
 
 BBS_SALT = "idMMaGYmVgPzh3wxmWudUXKUPGidO7GM"
 BBS_WEB_SALT = "G1ktdwFL4IyGkHuuWSmz0wUe9Db9scyK"
 BBS_X6_SALT = "t0qEgfub6cvueAPgR5m9aQWWVciEer7v"
 PASSPORT_X4_SALT = "xV8v4Qu54lUKrEYFZkJhB8cuOh9Asafs"
 PASSPORT_APP_SALT = "dDIQHbKOdaPaLuvQKVzUzqdeCaxjtaPV"
+PASSPORT_EXCHANGE_SALT = "JwYDpKvLj6MrMqqYU6jTKF17KNO2PXoS"
 
 PASSPORT_APP_ID = "bll8iq97cem8"
 QRCODE_APP_APP_ID = "ddxf5dufpuyo"
@@ -21,13 +25,19 @@ ZZZ_ACT_API = "https://act-nap-api.mihoyo.com"
 
 ACCOUNT_ROLES_URL = f"{TAKUMI_API}/binding/api/getUserGameRolesByCookie"
 
-GAME_HOME_URL = f"{TAKUMI_API}/event/luna/home?lang=zh-cn"
-GAME_INFO_URL = f"{TAKUMI_API}/event/luna/info?lang=zh-cn"
-GAME_SIGN_URL = f"{TAKUMI_API}/event/luna/sign"
 
-ZZZ_HOME_URL = f"{ZZZ_ACT_API}/event/luna/zzz/home?lang=zh-cn"
-ZZZ_INFO_URL = f"{ZZZ_ACT_API}/event/luna/zzz/info?lang=zh-cn"
-ZZZ_SIGN_URL = f"{ZZZ_ACT_API}/event/luna/zzz/sign"
+def luna_endpoints(api: str, signgame: str) -> dict[str, Any]:
+    """签到接口按游戏分路径（/event/luna/<signgame>/...），还必须带同名的 x-rpc-signgame 头。
+
+    旧的不带游戏段的 /event/luna/... 正在灰度下线，部分账号会返回 -500001。"""
+    base = f"{api}/event/luna/{signgame}"
+    return {
+        "home_url": f"{base}/home?lang=zh-cn",
+        "info_url": f"{base}/info?lang=zh-cn",
+        "sign_url": f"{base}/sign",
+        "extra_headers": {"x-rpc-signgame": signgame},
+    }
+
 
 BBS_TASKS_URL = f"{BBS_API}/apihub/wapi/getUserMissionsState"
 BBS_SIGN_URL = f"{BBS_API}/apihub/app/api/signIn"
@@ -50,11 +60,7 @@ QRCODE_FETCH_URL = f"{PASSPORT_API}/account/ma-cn-passport/app/createQRLogin"
 QRCODE_QUERY_URL = f"{PASSPORT_API}/account/ma-cn-passport/app/queryQRLoginStatus"
 LOGIN_CAPTCHA_URL = f"{PASSPORT_API}/account/ma-cn-verifier/verifier/createLoginCaptcha"
 LOGIN_BY_MOBILE_CAPTCHA_URL = f"{PASSPORT_API}/account/ma-cn-passport/app/loginByMobileCaptcha"
-LTOKEN_BY_STOKEN_URL = f"{PASSPORT_API}/account/auth/api/getLTokenBySToken"
-COOKIE_TOKEN_BY_STOKEN_URL = (
-    f"{PASSPORT_API}/account/auth/api/getCookieAccountInfoBySToken"
-)
-COOKIE_TOKEN_REFRESH_URL = f"{TAKUMI_API}/auth/api/getCookieAccountInfoBySToken"
+TOKEN_EXCHANGE_URL = f"{PASSPORT_API}/account/ma-cn-session/app/exchange"
 
 WEBVIEW_CHROME_VERSION = "103.0.5060.129"
 
@@ -78,60 +84,42 @@ GAMES = {
         "role": "旅行者",
         "game_biz": "hk4e_cn",
         "act_id": "e202311201442471",
-        "home_url": GAME_HOME_URL,
-        "info_url": GAME_INFO_URL,
-        "sign_url": GAME_SIGN_URL,
-        "extra_headers": {"x-rpc-signgame": "hk4e"},
+        **luna_endpoints(TAKUMI_API, "hk4e"),
     },
     "starrail": {
         "name": "崩坏：星穹铁道",
         "role": "开拓者",
         "game_biz": "hkrpg_cn",
         "act_id": "e202304121516551",
-        "home_url": GAME_HOME_URL,
-        "info_url": GAME_INFO_URL,
-        "sign_url": GAME_SIGN_URL,
-        "extra_headers": {},
+        **luna_endpoints(TAKUMI_API, "hkrpg"),
     },
     "zzz": {
         "name": "绝区零",
         "role": "绳匠",
         "game_biz": "nap_cn",
         "act_id": "e202406242138391",
-        "home_url": ZZZ_HOME_URL,
-        "info_url": ZZZ_INFO_URL,
-        "sign_url": ZZZ_SIGN_URL,
-        "extra_headers": {"x-rpc-signgame": "zzz"},
+        **luna_endpoints(ZZZ_ACT_API, "zzz"),
     },
     "honkai3rd": {
         "name": "崩坏3",
         "role": "舰长",
         "game_biz": "bh3_cn",
         "act_id": "e202306201626331",
-        "home_url": GAME_HOME_URL,
-        "info_url": GAME_INFO_URL,
-        "sign_url": GAME_SIGN_URL,
-        "extra_headers": {},
+        **luna_endpoints(TAKUMI_API, "bh3"),
     },
     "tears": {
         "name": "未定事件簿",
         "role": "律师",
         "game_biz": "nxx_cn",
         "act_id": "e202202251749321",
-        "home_url": GAME_HOME_URL,
-        "info_url": GAME_INFO_URL,
-        "sign_url": GAME_SIGN_URL,
-        "extra_headers": {},
+        **luna_endpoints(TAKUMI_API, "nxx"),
     },
     "honkai2": {
         "name": "崩坏学园2",
         "role": "玩家",
         "game_biz": "bh2_cn",
         "act_id": "e202203291431091",
-        "home_url": GAME_HOME_URL,
-        "info_url": GAME_INFO_URL,
-        "sign_url": GAME_SIGN_URL,
-        "extra_headers": {},
+        **luna_endpoints(TAKUMI_API, "bh2"),
     },
 }
 

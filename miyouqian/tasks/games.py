@@ -32,7 +32,7 @@ class GameCheckin:
         enabled = self.config.get("games", {}).get("enabled", [])
         if only_games:
             enabled = [game for game in enabled if game in only_games]
-        # 2026-11-20 起签到接口会拒绝过期的 cookie_token，查角色接口却可能照常放行，
+        # cookie_token_v2 只有 48 小时有效期，签到接口会拒绝过期的，查角色接口却可能照常放行，
         # 等 -100 再刷新来不及，所以每轮签到前先用 stoken 换一次
         if enabled and self.account.get("stoken"):
             refresh_cookie_token(self.client, self.account, self.device)
