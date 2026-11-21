@@ -263,15 +263,25 @@ def print_qrcode(text: str, image_path: pathlib.Path | None = None) -> None:
 
 
 def refresh_cookie_token(client: ApiClient, account: dict[str, Any], device: dict[str, Any] | None = None) -> bool:
-    try:
-        data = client.get_json(
-            c.COOKIE_TOKEN_REFRESH_URL,
-            headers={"cookie": cookies.stoken_cookie(account), "user-agent": devicelib.mobile_ua(device or {})},
-        )
-        ensure_ok(data, "刷新 cookie_token 失败")
-    except Exception:
-        return False
-    token = str(data.get("data", {}).get("cookie_token") or "")
+    stoken = str(account.get("stoken") or "")
+    mid = str(account.get("mid") or cookies.guess_mid(str(account.get("cookie") or "")))
+    token = ""
+    # takumi 的刷新接口在部分环境返回 -464，v2 stoken 优先走 passport，两边签发的是同一个 cookie_token
+    if stoken.startswith("v2_") and mid:
+        try:
+            token = PassportLogin(client, device or {})._get_cookie_token(stoken, mid)
+        except Exception:
+            token = ""
+    if not token:
+        try:
+            data = client.get_json(
+                c.COOKIE_TOKEN_REFRESH_URL,
+                headers={"cookie": cookies.stoken_cookie(account), "user-agent": devicelib.mobile_ua(device or {})},
+            )
+            ensure_ok(data, "刷新 cookie_token 失败")
+        except Exception:
+            return False
+        token = str(data.get("data", {}).get("cookie_token") or "")
     if not token:
         return False
     account["cookie"] = cookies.replace_or_append_cookie_value(
