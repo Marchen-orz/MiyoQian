@@ -451,6 +451,7 @@ class WebApp:
 
     def shop_account_meta(self, account_index: int, game_biz: str = "") -> dict[str, Any]:
         account = self._account_by_index(account_index)
+        cookie_before = str(account.get("cookie") or "")
         account_name = display_account_name(account)
         self.log(f"开始获取兑换账号信息: {account_name}，game_biz={game_biz or '无'}", "exchange")
         with self.lock:
@@ -468,6 +469,7 @@ class WebApp:
             except Exception as exc:
                 result["addresses_error"] = str(exc)
                 self.log(f"收货地址获取失败: {account_name}，{exc}", "exchange")
+            self._keep_refreshed_cookie(account, cookie_before)
             if game_biz:
                 try:
                     result["roles"] = shop.roles(game_biz)
@@ -483,6 +485,7 @@ class WebApp:
 
     def shop_exchange_once(self, plan: dict[str, Any], on_progress: Callable[[int, str], None] | None = None) -> dict[str, Any]:
         account = self._account_by_index(self._plan_account_index(plan))
+        cookie_before = str(account.get("cookie") or "")
         account_name = display_account_name(account)
         goods_name = str(plan.get("goods_name") or plan.get("goods_id") or "未知商品")
         log_prefix = f"【账号 {account_name}｜商品 {goods_name}】"
@@ -502,6 +505,8 @@ class WebApp:
         except Exception as exc:
             self.log(f"{log_prefix}商品兑换请求异常: {exc}", "exchange")
             raise
+        finally:
+            self._keep_refreshed_cookie(account, cookie_before)
         summary = f"{result.get('message', '未知结果')}({result.get('retcode')})，请求 {result.get('attempt', 1)} 次"
         self.log(f"{log_prefix}商品兑换结束: {summary}", "exchange")
         return result
@@ -684,6 +689,19 @@ class WebApp:
         if index is None:
             raise ValueError("兑换计划所属账号已不存在，请重新选择执行账号")
         return index
+
+    def _keep_refreshed_cookie(self, account: dict[str, Any], cookie_before: str) -> None:
+        """商店接口用的是账号副本，期间用 stoken 刷新过 cookie_token 的话写回配置，下次不用再换。"""
+        cookie = str(account.get("cookie") or "")
+        if cookie == cookie_before:
+            return
+        with self.lock:
+            accounts = self.config.get("accounts") or []
+            index = find_account_index_by_stuid(accounts, str(account.get("stuid") or ""))
+            if index is None:
+                return
+            accounts[index]["cookie"] = cookie
+            save_config(self.config_path, self.config)
 
     def _account_by_index(self, account_index: int) -> dict[str, Any]:
         with self.lock:

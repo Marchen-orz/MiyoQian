@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from .. import constants as c
+from ..auth.login import refresh_cookie_token
 from ..core import device as devicelib
 from ..core.http import ApiClient
 
@@ -28,7 +29,8 @@ TERMINAL_FAILURES = (
     ("商品已售罄", ("已售罄", "已兑完", "库存不足")),
     ("登录已失效", ("未登录", "登录失效", "请先登录")),
 )
-LOGIN_RETCODES = {-100}
+# 收货地址等接口登录失效返回 -100，米游币余额接口返回 -2007
+LOGIN_RETCODES = {-100, -2007}
 # 同一种不可重试的失败连续出现这么多次才提前结束，防止开抢瞬间的一次误判
 TERMINAL_CONFIRM_HITS = 2
 
@@ -55,6 +57,7 @@ class ShopExchange:
         self.account = account or {}
         self.device = config["device"]
         self.emit = emit
+        self._cookie_refreshed = False
 
     def goods(self, game: str = "", max_pages: int = 5) -> dict[str, Any]:
         raw_goods: list[dict[str, Any]] = []
@@ -117,23 +120,36 @@ class ShopExchange:
             return raw
         return {**raw, **detail}
 
+    def _refresh_cookie(self) -> bool:
+        """cookie_token 会被服务端作废，遇到登录失效先用 stoken 换一个新的，每个实例只换一次。"""
+        if self._cookie_refreshed or not self.account.get("stoken"):
+            return False
+        self._cookie_refreshed = True
+        if not refresh_cookie_token(self.client, self.account, self.device):
+            return False
+        self._add("cookie_token 已失效，已用 stoken 重新获取")
+        return True
+
+    def _account_get(self, url: str, params: dict[str, Any], origin: str) -> dict[str, Any]:
+        while True:
+            data = self.client.get_json(
+                url,
+                params=params,
+                headers=self._account_headers(host="api-takumi.mihoyo.com", origin=origin),
+            )
+            reason = terminal_failure_reason(data.get("retcode"), str(data.get("message") or ""))
+            if reason != "登录已失效" or not self._refresh_cookie():
+                return data
+
     def points(self) -> dict[str, Any]:
-        data = self.client.get_json(
-            c.MALL_POINT_URL,
-            params={"app_id": 1, "point_sn": "myb"},
-            headers=self._account_headers(host="api-takumi.mihoyo.com", origin="https://webstatic.mihoyo.com"),
-        )
+        data = self._account_get(c.MALL_POINT_URL, {"app_id": 1, "point_sn": "myb"}, "https://webstatic.mihoyo.com")
         if data.get("retcode") != 0:
             raise ValueError(str(data.get("message") or "米游币余额获取失败"))
         raw = data.get("data") or {}
         return raw if isinstance(raw, dict) else {}
 
     def addresses(self) -> list[dict[str, Any]]:
-        data = self.client.get_json(
-            c.MALL_ADDRESS_URL,
-            params={"t": round(time.time() * 1000)},
-            headers=self._account_headers(host="api-takumi.mihoyo.com", origin="https://user.mihoyo.com"),
-        )
+        data = self._account_get(c.MALL_ADDRESS_URL, {"t": round(time.time() * 1000)}, "https://user.mihoyo.com")
         if data.get("retcode") != 0:
             raise ValueError(str(data.get("message") or "收货地址获取失败"))
         raw_list = (data.get("data") or {}).get("list") or []
@@ -153,11 +169,7 @@ class ShopExchange:
     def roles(self, game_biz: str) -> list[dict[str, str]]:
         if not game_biz:
             return []
-        data = self.client.get_json(
-            c.ACCOUNT_ROLES_URL,
-            params={"game_biz": game_biz},
-            headers=self._account_headers(host="api-takumi.mihoyo.com", origin="https://webstatic.mihoyo.com"),
-        )
+        data = self._account_get(c.ACCOUNT_ROLES_URL, {"game_biz": game_biz}, "https://webstatic.mihoyo.com")
         if data.get("retcode") != 0:
             return []
         raw_roles = (data.get("data") or {}).get("list") or []
@@ -235,6 +247,8 @@ class ShopExchange:
             if last.get("ok") or remaining <= 0:
                 return last
             reason = terminal_failure_reason(last.get("retcode"), str(last.get("message") or ""))
+            if reason == "登录已失效" and self._refresh_cookie():
+                continue
             terminal_hits = terminal_hits + 1 if reason else 0
             if terminal_hits >= TERMINAL_CONFIRM_HITS:
                 self._add(f"商品 {plan.get('goods_id', '')} 连续返回「{reason}」，重试不会成功，提前结束")
