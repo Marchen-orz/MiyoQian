@@ -766,7 +766,7 @@ def build_bbs_section_html(summary: dict[str, Any]) -> str:
         <div style="padding:8px 0;border-top:1px solid #edf3f8;">
           <div style="font-size:13px;margin-bottom:4px;">
             <b style="color:#102033;">{html.escape(task["name"])}</b>
-            <span style="float:right;color:{html.escape(task["color"])};">{html.escape(task["label"])} · {task["done"]}/{task["total"]}</span>
+            <span style="float:right;color:{html.escape(task["color"])};">{html.escape(task_status_text(task))}</span>
           </div>
           {segmented_progress_html(task["done_percent"], task["failed_percent"], "", compact=True)}
         </div>
@@ -784,6 +784,13 @@ def build_bbs_section_html(summary: dict[str, Any]) -> str:
       {task_rows}
     </div>
     """.strip()
+
+
+def task_status_text(task: dict[str, Any]) -> str:
+    """没开启的任务只显示「跳过」，不带 0/0 计数。"""
+    if task["skipped"]:
+        return task["label"]
+    return f"{task['label']} · {task['done']}/{task['total']}"
 
 
 def section_empty_html(title: str, message: str) -> str:
@@ -871,7 +878,10 @@ def build_bbs_section_text(summary: dict[str, Any], markdown: bool = False) -> s
     ]
     for task in bbs["tasks"]:
         bar = segmented_text_bar(task["done_percent"], task["failed_percent"])
-        lines.append(f"- {task['name']} {bar} {task['label']} ({task['done']}/{task['total']})")
+        if task["skipped"]:
+            lines.append(f"- {task['name']} {task['label']}")
+        else:
+            lines.append(f"- {task['name']} {bar} {task['label']} ({task['done']}/{task['total']})")
     if bbs["summary"]:
         lines.append(f"- {bbs['summary']}")
     return "\n".join(lines)
@@ -1094,6 +1104,11 @@ def task_progress(
     fail_keywords: tuple[str, ...],
     captcha_scene: str = "",
 ) -> dict[str, Any]:
+    if any(line.startswith(f"{name}未开启") for line in lines):
+        return {
+            "name": name, "done": 0, "total": 0, "failed": 0, "skipped": True,
+            "done_percent": 0, "failed_percent": 0, "label": "跳过", "color": "#627389",
+        }
     completed_by_skip = any(any(keyword in line for keyword in skip_keywords) for line in lines)
     started = sum(1 for line in lines if start_matcher(line))
     done = count_task_items(success_items, item_keywords)
@@ -1119,6 +1134,7 @@ def task_progress(
         "done": min(done, total),
         "total": total,
         "failed": failed,
+        "skipped": False,
         "done_percent": status["done_percent"],
         "failed_percent": status["failed_percent"],
         "label": status["label"],
