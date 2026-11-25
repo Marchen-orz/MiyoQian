@@ -112,6 +112,10 @@ push:
       server: ""          # 服务器地址，形如 https://gotify.example.com，不含 /message 路径
       token: ""           # App Token
       priority: 5         # 优先级 0-10，默认 5
+    # MeoW（鸿蒙推送 App）
+    - provider: meow
+      enable: false
+      nickname: ""        # MeoW App 里的推送昵称，不能包含 /
 
 shop_exchange:
   enable: true        # 定时兑换总开关，关闭后仍可手动执行

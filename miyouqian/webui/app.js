@@ -29,6 +29,7 @@ const pushChannelOptions = [
   ["qq", "QQ推送"],
   ["qqbot", "QQ机器人（QQ开放平台）"],
   ["gotify", "Gotify"],
+  ["meow", "MeoW"],
 ];
 
 // 通道图标放在 /assets/push/，文件名和通道 provider 一一对应
@@ -43,6 +44,7 @@ const pushChannelIconFiles = {
   qq: "qq.svg",
   qqbot: "qqbot.svg",
   gotify: "gotify.png",
+  meow: "meow.png",
 };
 
 // 通道字段的默认值：取值等于默认值不算「已配置」。
@@ -866,6 +868,7 @@ function pushChannelFields(provider, channel) {
     server: channel.server || "",
     // 0 是合法的最低优先级，不能用 || 回退到默认值
     priority: String(channel.priority ?? "").trim() || pushChannelDefaults.gotify.priority,
+    nickname: channel.nickname || "",
   };
   const field = (name, label, type = "text", attrs = "") => `
     <label>
@@ -963,6 +966,9 @@ function pushChannelFields(provider, channel) {
       field("server", "服务器地址"),
       field("token", "App Token", "password"),
       field("priority", "优先级（0-10，默认 5）", "number", 'min="0" max="10" step="1"'),
+    ],
+    meow: [
+      field("nickname", "昵称（MeoW App 里的推送昵称）"),
     ],
   };
 
@@ -1161,6 +1167,7 @@ function pushChannelFieldNames(provider) {
       "smtp_ssl",
     ],
     gotify: ["server", "token", "priority"],
+    meow: ["nickname"],
   };
   return fields[provider] || [];
 }
