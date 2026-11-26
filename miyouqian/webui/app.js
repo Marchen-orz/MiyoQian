@@ -2016,8 +2016,8 @@ function serverConfig({ includeDrafts = true } = {}) {
   for (const channel of pushChannels) {
     if (channel.provider === 'qq' && channel.push_url && typeof channel.push_url === 'string') {
       const url = channel.push_url.trim();
-      if (url && !url.includes('http://')) {
-        throw new Error('QQ 推送的 HTTP API 地址必须包含 "http://"');
+      if (url && !/^https?:\/\//i.test(url)) {
+        throw new Error('QQ 推送的 HTTP API 地址必须以 "http://" 或 "https://" 开头');
       }
     }
   }
