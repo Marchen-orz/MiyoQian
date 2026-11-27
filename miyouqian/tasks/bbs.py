@@ -51,7 +51,8 @@ class BbsTasks:
         task_flags = self._task_flags(state)
         possible_today = received + can_get
         self._add(messages, f"米游币今日进度：已获得 {received}，还可获得 {can_get}，预计总共可获得 {possible_today}")
-        # 没勾选的任务记为跳过；账号没有某个任务时照常执行，只是不加米游币，不算失败
+        # 没勾选的任务记为跳过；账号没有某个任务或米游币已拿满时，已勾选且未确认完成的任务仍照常执行（用于获取社区经验），不算失败
+        has_pending_tasks = False
         for key, flag, name in (("checkin", "sign", "社区签到"), ("read", "read", "看帖任务"), ("like", "like", "点赞任务"), ("share", "share", "分享任务")):
             if not self.bbs_config.get(key, True):
                 skipped.append(f"{name}未开启")
@@ -59,7 +60,9 @@ class BbsTasks:
             elif task_flags[flag]:
                 skipped.append(f"{name}已完成")
                 self._add(messages, f"{name}已完成，跳过")
-        if can_get == 0:
+            else:
+                has_pending_tasks = True
+        if can_get == 0 and not has_pending_tasks:
             self._add(messages, f"今日任务已完成，今日已得 {received}，当前总计 {total}")
             self._add(messages, f"米游币任务汇总：成功 0，失败 0，跳过 {len(skipped)}，今日总共可获得 {possible_today}，实际已获得 {received}，本次新增 0")
             return messages
@@ -207,6 +210,9 @@ class BbsTasks:
                 if data.get("retcode") == 0:
                     self._add(messages, f"{forum['name']} 社区签到成功")
                     success.append(f"{forum['name']}社区签到")
+                elif data.get("retcode") == 1008:
+                    self._add(messages, f"{forum['name']} 社区签到成功（今日已签到）")
+                    success.append(f"{forum['name']}社区签到")
                 elif data.get("retcode") == 1034:
                     retry_data = self._retry_bbs_captcha_request(
                         messages,
@@ -215,6 +221,9 @@ class BbsTasks:
                     )
                     if retry_data.get("retcode") == 0:
                         self._add(messages, f"{forum['name']} 社区签到成功")
+                        success.append(f"{forum['name']}社区签到")
+                    elif retry_data.get("retcode") == 1008:
+                        self._add(messages, f"{forum['name']} 社区签到成功（今日已签到）")
                         success.append(f"{forum['name']}社区签到")
                     elif not captcha.is_enabled(self.config):
                         self._add(messages, f"{forum['name']} 社区签到触发验证码，已跳过")
@@ -413,7 +422,7 @@ class BbsTasks:
                 last_data = {"retcode": 1034, "message": "验证码处理失败"}
                 continue
             last_data = request(challenge)
-            if last_data.get("retcode") == 0 or last_data.get("message") == "OK":
+            if last_data.get("retcode") in (0, 1008) or last_data.get("message") == "OK":
                 return last_data
             if attempt < max_retries:
                 self._add(messages, f"{scene}验证码提交失败，准备重新获取验证码")
