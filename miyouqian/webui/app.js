@@ -119,6 +119,13 @@ let logsPinnedToBottom = true;
 let activeView = "dashboard";
 const ACCOUNTS_VISIBLE = 3;      // 账号栏最多同时露出几个账号，其余在列表里滚动
 const PANEL_STATE_KEY = "miyouqian.panels";
+const GITHUB_REPO_URL = "https://github.com/Marchen-orz/MiyoQian";
+const STAR_PROMPT_KEY = "miyouqian.starPrompt";
+const STAR_INITIAL_DELAY_MS = 3 * 24 * 60 * 60 * 1000; // 首次使用满 3 天后提示
+const STAR_SNOOZE_MS = 14 * 24 * 60 * 60 * 1000;       // 稍后再说后 14 天再提示一次
+const STAR_SESSION_DELAY_MS = 8 * 1000;                // 打开页面后稍等几秒再弹出，避免打断首屏操作
+let starPromptTimer = null;
+let starPromptInterval = null;
 const LOG_PANEL_GAP = 24;        // 日志栏贴着窗口底部时留的边距
 const LOG_PANEL_TOP = 16;        // 同 CSS 里 .side-column 的 sticky top
 let logFitQueued = false;
@@ -4033,6 +4040,148 @@ function bindUpdateEvents() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// GitHub Star 引导弹窗
+// ---------------------------------------------------------------------------
+function readStarPromptState() {
+  if (typeof localStorage === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(STAR_PROMPT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStarPromptState(state) {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(STAR_PROMPT_KEY, JSON.stringify(state));
+  } catch {
+    // 无痕模式或禁用存储时静默忽略
+  }
+}
+
+function evaluateStarPrompt(now = Date.now()) {
+  const saved = readStarPromptState();
+  if (!saved || !Number.isFinite(Number(saved.firstSeenAt))) {
+    writeStarPromptState({
+      firstSeenAt: now,
+      lastShownAt: 0,
+      snoozedUntil: 0,
+      dismissed: false,
+    });
+    return false;
+  }
+  if (saved.dismissed) return false;
+  if (now - Number(saved.firstSeenAt) < STAR_INITIAL_DELAY_MS) return false;
+  if (saved.snoozedUntil && now < Number(saved.snoozedUntil)) return false;
+  if (saved.lastShownAt && now - Number(saved.lastShownAt) < STAR_SNOOZE_MS) return false;
+  return true;
+}
+
+function showStarPromptModal(now = Date.now()) {
+  if (document.querySelector(".modal-overlay") || document.getElementById("authOverlay")) {
+    return false;
+  }
+  const current = readStarPromptState() || { firstSeenAt: now, dismissed: false };
+  writeStarPromptState({
+    ...current,
+    lastShownAt: now,
+  });
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "starPromptOverlay";
+  overlay.innerHTML = `
+    <div class="modal-card star-modal-card" role="dialog" aria-modal="true" aria-labelledby="starPromptTitle">
+      <div class="modal-head">
+        <div class="star-modal-hero">
+          <span class="star-modal-icon" aria-hidden="true">
+            <svg><use href="#i-star"></use></svg>
+          </span>
+          <div>
+            <h2 id="starPromptTitle">觉得米游签好用吗？</h2>
+            <p>免费开源项目，欢迎去 GitHub 点一颗 Star 支持一下！</p>
+          </div>
+        </div>
+        <button class="ghost icon-only" type="button" data-star-action="snooze" title="稍后再说">
+          <svg><use href="#i-x"></use></svg>
+        </button>
+      </div>
+      <p class="star-modal-body">
+        如果你已经用了一段时间、签到和兑换帮到了你，点个 Star 就是对项目持续适配新接口和维护的最大鼓励。
+      </p>
+      <div class="star-modal-actions">
+        <button class="star-modal-dismiss" type="button" data-star-action="dismiss">
+          已 Star，不再提示
+        </button>
+        <div class="star-modal-right">
+          <button class="ghost" type="button" data-star-action="snooze">稍后再说</button>
+          <a
+            class="primary star-modal-cta"
+            href="${GITHUB_REPO_URL}"
+            target="_blank"
+            rel="noopener noreferrer"
+            data-star-action="go"
+          >
+            <svg><use href="#i-star"></use></svg>
+            <span>去 GitHub 点 Star</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.insertBefore(overlay, document.querySelector(".toast"));
+
+  const closeWith = (mode) => {
+    const latest = readStarPromptState() || { firstSeenAt: now };
+    const ts = Date.now();
+    if (mode === "go" || mode === "dismiss") {
+      writeStarPromptState({ ...latest, lastShownAt: ts, snoozedUntil: 0, dismissed: true });
+      showToast(mode === "go" ? "感谢支持！欢迎在 GitHub 点亮 Star" : "感谢支持，后续不再提示");
+    } else {
+      writeStarPromptState({ ...latest, lastShownAt: ts, snoozedUntil: ts + STAR_SNOOZE_MS, dismissed: false });
+    }
+    overlay.remove();
+  };
+
+  overlay.querySelectorAll("[data-star-action]").forEach((el) => {
+    el.addEventListener("click", () => closeWith(el.dataset.starAction));
+  });
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) closeWith("snooze");
+  });
+  overlay.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeWith("snooze");
+  });
+  return true;
+}
+
+function scheduleStarPrompt() {
+  if (starPromptTimer) {
+    clearTimeout(starPromptTimer);
+    starPromptTimer = null;
+  }
+  if (evaluateStarPrompt()) {
+    starPromptTimer = setTimeout(() => {
+      starPromptTimer = null;
+      if (evaluateStarPrompt()) {
+        showStarPromptModal();
+      }
+    }, STAR_SESSION_DELAY_MS);
+  }
+  if (!starPromptInterval) {
+    starPromptInterval = setInterval(() => {
+      if (evaluateStarPrompt()) {
+        showStarPromptModal();
+      }
+    }, 60 * 60 * 1000);
+  }
+}
+
 function bindEvents() {
   bindDeviceEvents();
   bindUpdateEvents();
@@ -4189,6 +4338,7 @@ function startApp() {
       }
     });
   }, 3000);
+  scheduleStarPrompt();
 }
 
 checkAuthAndInit();
