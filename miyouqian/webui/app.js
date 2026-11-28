@@ -129,6 +129,12 @@ let deviceInfo = null;           // GET /api/device 的结果，没取到是 nul
 let deviceError = "";            // 读取设备信息失败的原因
 let deviceBusy = "";             // 正在进行的操作（fp / import / reset），空表示空闲
 let deviceImportDraft = "";      // 导入框里还没提交的文字，面板重绘时保留
+let updateState = null;          // GET /api/update/status 的结果
+let updateError = "";            // 读取或检查更新失败的原因
+let updateBusy = "";             // 正在进行的操作（check / apply），空表示空闲
+let updatePollTimer = null;
+let updateRestartTimer = null;
+let updateStartupSynced = false;
 
 
 const $ = (id) => document.getElementById(id);
@@ -168,6 +174,7 @@ async function loadConfig() {
   renderConfig();
   loadAllPlanAddresses();
   loadDevice();
+  loadUpdateStatus();
 }
 
 function renderConfig() {
@@ -1892,6 +1899,17 @@ function collectConfig() {
     ...(config.captcha || {}),
     max_retries: Number($("captchaMaxRetries").value || 3),
   };
+  const updateCheckEl = $("updateCheckOnStart");
+  const updateGhEl = $("updateGithubMirror");
+  const updateGhcrEl = $("updateGhcrMirror");
+  if (updateCheckEl || updateGhEl || updateGhcrEl) {
+    config.update = {
+      ...(config.update || {}),
+      check_on_start: updateCheckEl ? Boolean(updateCheckEl.checked) : Boolean(config.update?.check_on_start ?? true),
+      github_mirror: updateGhEl ? String(updateGhEl.value || "").trim() : String(config.update?.github_mirror || "").trim(),
+      ghcr_mirror: updateGhcrEl ? String(updateGhcrEl.value || "").trim() : String(config.update?.ghcr_mirror || "").trim(),
+    };
+  }
   config.captcha.channels = Array.from(
     document.querySelectorAll("[data-captcha-provider]"),
   )
@@ -3525,8 +3543,499 @@ function bindDeviceEvents() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// 版本检查与自动更新
+// ---------------------------------------------------------------------------
+const UPDATE_MODE_LABELS = {
+  docker: "Docker 容器",
+  git: "Git 源码部署",
+  source: "源码包部署",
+};
+
+function formatIsoTime(isoText) {
+  const text = String(isoText || "").trim();
+  if (!text) return "";
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return text;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function updateTopbarBadge() {
+  const badgeBtn = $("updateBadgeBtn");
+  const badgeText = $("updateBadgeText");
+  const summaryNote = $("updateSummaryNote");
+  const check = updateState?.check;
+  const hasUpdate = Boolean(check?.has_update);
+  if (badgeBtn) {
+    badgeBtn.classList.toggle("is-hidden", !hasUpdate);
+  }
+  if (badgeText && hasUpdate) {
+    const shortSha = check?.remote?.short_commit || "";
+    badgeText.textContent = shortSha ? `新版本 ${shortSha}` : "有新版本";
+  }
+  if (summaryNote) {
+    if (updateState?.status === "restarting") {
+      summaryNote.textContent = "正在重启服务以应用新版本…";
+    } else if (updateState?.running) {
+      summaryNote.textContent = updateState.message || "正在更新…";
+    } else if (hasUpdate && check?.remote?.short_commit) {
+      summaryNote.textContent = `发现新提交 ${check.remote.short_commit}`;
+    } else if (check?.remote?.short_commit) {
+      summaryNote.textContent = `已是最新 (${check.remote.short_commit})`;
+    } else {
+      summaryNote.textContent = "检测 GitHub 最新提交与一键更新";
+    }
+  }
+}
+
+async function loadUpdateStatus() {
+  try {
+    updateState = await api("/api/update/status");
+    updateError = "";
+  } catch (error) {
+    updateError = `更新状态读取失败：${error.message}`;
+  }
+  renderUpdatePanel();
+  updateTopbarBadge();
+  if (updateState?.running) {
+    startUpdatePolling();
+  } else if (updateState?.status === "restarting") {
+    waitForServerRestart();
+  } else if (!updateStartupSynced && updateState && !updateState.check && (config?.update?.check_on_start ?? true)) {
+    // 启动后台自动检测约 2 秒后完成，稍后静默同步一次展示结果
+    updateStartupSynced = true;
+    setTimeout(() => {
+      if (!updateState?.check && !updateBusy) {
+        loadUpdateStatus().catch(() => {});
+      }
+    }, 3500);
+  }
+}
+
+function currentUpdateMirrorDraft() {
+  const ghInput = $("updateGithubMirror");
+  const ghcrInput = $("updateGhcrMirror");
+  return {
+    github_mirror: ghInput ? String(ghInput.value || "").trim() : String(config?.update?.github_mirror || updateState?.config?.github_mirror || "").trim(),
+    ghcr_mirror: ghcrInput ? String(ghcrInput.value || "").trim() : String(config?.update?.ghcr_mirror || updateState?.config?.ghcr_mirror || "").trim(),
+  };
+}
+
+function renderUpdatePanel() {
+  const host = $("updatePanel");
+  if (!host) return;
+  const state = updateState;
+  if (!state) {
+    host.innerHTML = `<p class="task-note">${escapeHtml(updateError || "正在读取版本信息…")}</p>`;
+    return;
+  }
+  const local = state.local || {};
+  const check = state.check || null;
+  const remote = check?.remote || null;
+  const mode = local.mode || "source";
+  const modeLabel = UPDATE_MODE_LABELS[mode] || mode;
+  const isBusy = Boolean(updateBusy || state.running || state.status === "restarting");
+  const disabled = isBusy ? "disabled" : "";
+  const canApply = Boolean(local.can_auto_update) && !local.dirty;
+
+  let modeTag = '<em class="device-tag ok">支持一键更新</em>';
+  if (mode === "docker" && !local.docker_socket_available) {
+    modeTag = '<em class="device-tag warn">未挂载 docker.sock</em>';
+  } else if (local.dirty) {
+    modeTag = '<em class="device-tag warn">存在未提交修改</em>';
+  }
+
+  const localCommit = local.short_commit || "未知";
+  const localTime = formatIsoTime(local.commit_time);
+  const localMeta = [
+    local.branch && mode === "git" ? `分支 ${local.branch}` : "",
+    localTime ? localTime : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  let remoteHtml = '<span class="update-muted">尚未检查，点击下方「检查更新」获取最新提交</span>';
+  if (remote) {
+    const statusTag = check.has_update
+      ? '<em class="device-tag warn">有新版本</em>'
+      : '<em class="device-tag ok">已是最新</em>';
+    const sourceTag = remote.source ? `<em class="device-tag">${escapeHtml(remote.source)}</em>` : "";
+    const remoteTime = formatIsoTime(remote.commit_time);
+    remoteHtml = `
+      <div>
+        <a class="update-link" href="${escapeAttr(remote.url || "#")}" target="_blank" rel="noopener noreferrer"><code>${escapeHtml(remote.short_commit || "-")}</code></a>
+        ${statusTag}
+        ${sourceTag}
+      </div>
+      ${remote.commit_message ? `<div class="update-commit-msg">${escapeHtml(remote.commit_message)}</div>` : ""}
+      ${remoteTime ? `<div class="update-muted">${escapeHtml(remoteTime)}${check.checked_at ? ` · 检测于 ${escapeHtml(check.checked_at)}` : ""}</div>` : ""}
+    `;
+  }
+
+  const newCommits = check?.has_update && Array.isArray(check.new_commits) ? check.new_commits : [];
+  const commitsHtml = newCommits.length
+    ? `
+      <div class="update-commits">
+        <strong>待更新提交（最近 ${newCommits.length} 条）</strong>
+        <ul>
+          ${newCommits
+            .map(
+              (item) => `
+                <li>
+                  <a class="update-link" href="${escapeAttr(item.url || "#")}" target="_blank" rel="noopener noreferrer"><code>${escapeHtml(item.short_sha || "")}</code></a>
+                  <span>${escapeHtml(item.message || "")}</span>
+                </li>
+              `,
+            )
+            .join("")}
+        </ul>
+      </div>
+    `
+    : "";
+
+  let statusHtml = "";
+  const statusMsg = updateError || (state.status && state.status !== "idle" && state.status !== "checked" ? state.message : "");
+  if (statusMsg) {
+    const tone = updateError || state.status === "error"
+      ? "error"
+      : state.status === "restarting" || state.running
+        ? "info"
+        : "ok";
+    statusHtml = `<p class="update-status ${tone}">${escapeHtml(statusMsg)}</p>`;
+  }
+
+  let warningHtml = "";
+  if (mode === "docker" && !local.docker_socket_available) {
+    const cmd = state.manual_command || check?.manual_command || "docker compose pull && docker compose up -d";
+    warningHtml = `
+      <div class="update-command-box">
+        <div class="update-command-head">
+          <span>当前容器无法访问 /var/run/docker.sock（${escapeHtml(local.docker_socket_error || "未挂载或无权限")}），请在宿主机执行：</span>
+          <button class="ghost" type="button" data-update-action="copy-cmd">复制命令</button>
+        </div>
+        <pre id="updateManualCmd">${escapeHtml(cmd)}</pre>
+      </div>
+    `;
+  } else if (local.dirty) {
+    warningHtml = `<p class="task-note">检测到未提交的本地代码修改（${escapeHtml((local.dirty_files || []).slice(0, 4).join("、"))}），自动更新已锁定以防覆盖。</p>`;
+  }
+
+  const cfgUpdate = config?.update || state.config || {};
+  const checkOnStart = Boolean(cfgUpdate.check_on_start ?? true);
+  const ghMirror = String(cfgUpdate.github_mirror || "");
+  const ghcrMirror = String(cfgUpdate.ghcr_mirror || "");
+
+  const applyIdleText =
+    mode === "docker"
+      ? check?.has_update
+        ? "拉取新镜像并重建"
+        : "重新拉取镜像"
+      : check?.has_update
+        ? "拉取新版本并重启"
+        : "重新拉取更新";
+  const applyBtnClass = check?.has_update ? "primary" : "ghost";
+  const applyLabel =
+    state.status === "restarting"
+      ? "重启中…"
+      : updateBusy === "apply" || state.running
+        ? "更新中…"
+        : applyIdleText;
+  const checkLabel = updateBusy === "check" ? "检查中…" : "检查更新";
+
+  host.innerHTML = `
+    <div class="device-facts">
+      <div class="device-fact">
+        <span>部署方式</span>
+        <div>
+          <strong>${escapeHtml(modeLabel)}</strong>
+          ${modeTag}
+        </div>
+      </div>
+      ${
+        mode === "docker" && local.image
+          ? `<div class="device-fact"><span>当前镜像</span><code>${escapeHtml(local.image)}</code></div>`
+          : ""
+      }
+      <div class="device-fact">
+        <span>当前版本</span>
+        <div>
+          <code>${escapeHtml(localCommit)}</code>
+          ${localMeta ? `<span class="update-muted"> · ${escapeHtml(localMeta)}</span>` : ""}
+        </div>
+      </div>
+      <div class="device-fact">
+        <span>最新版本</span>
+        <div>${remoteHtml}</div>
+      </div>
+    </div>
+    ${commitsHtml}
+    ${statusHtml}
+    ${warningHtml}
+    <div class="device-actions">
+      <button class="ghost" type="button" data-update-action="check" ${disabled}>
+        <svg><use href="#i-refresh"></use></svg>
+        <span>${checkLabel}</span>
+      </button>
+      <button
+        class="${applyBtnClass}"
+        type="button"
+        data-update-action="apply"
+        ${disabled || !canApply ? "disabled" : ""}
+      >
+        <svg><use href="#i-download"></use></svg>
+        <span>${applyLabel}</span>
+      </button>
+    </div>
+    <div class="update-settings">
+      <label class="check-row">
+        <input id="updateCheckOnStart" type="checkbox" ${checkOnStart ? "checked" : ""} data-autosave />
+        <span>启动 Web 控制台时自动检查更新</span>
+      </label>
+      <div class="form-grid ${mode === "docker" ? "two" : ""} compact">
+        <label>
+          <span>GitHub 加速前缀（选填）</span>
+          <input
+            id="updateGithubMirror"
+            type="text"
+            value="${escapeAttr(ghMirror)}"
+            placeholder="留空自动回退内置加速源，如 https://gh-proxy.org/"
+            data-autosave
+          />
+        </label>
+        ${
+          mode === "docker"
+            ? `
+          <label>
+            <span>GHCR 镜像加速域名（选填）</span>
+            <input
+              id="updateGhcrMirror"
+              type="text"
+              value="${escapeAttr(ghcrMirror)}"
+              placeholder="留空自动回退 ghcr.nju.edu.cn"
+              data-autosave
+            />
+          </label>
+        `
+            : ""
+        }
+      </div>
+      <p class="task-note">直连 GitHub 或 ghcr.io 失败时会自动尝试国内加速镜像，通常保持留空即可。</p>
+    </div>
+  `;
+}
+
+async function checkForUpdate() {
+  if (updateBusy || updateState?.running) return;
+  updateBusy = "check";
+  updateError = "";
+  renderUpdatePanel();
+  try {
+    const mirrors = currentUpdateMirrorDraft();
+    const data = await api("/api/update/check", {
+      method: "POST",
+      body: JSON.stringify(mirrors),
+    });
+    updateState = data;
+    const remote = data.check?.remote;
+    if (data.check?.has_update) {
+      showToast(`发现新版本 ${remote?.short_commit || ""}（${remote?.source || ""}）`);
+    } else {
+      showToast(`当前已是最新版本（${remote?.short_commit || ""}）`);
+    }
+  } catch (error) {
+    updateError = error.message;
+    showToast(`检查更新失败：${error.message}`);
+  } finally {
+    updateBusy = "";
+    renderUpdatePanel();
+    updateTopbarBadge();
+  }
+}
+
+function confirmUpdateDialog(mode, hasUpdate, remoteSha) {
+  const isDocker = mode === "docker";
+  const title = isDocker ? "拉取最新镜像并重建容器" : "拉取最新版本并重启服务";
+  const desc = isDocker
+    ? `将拉取最新 Docker 镜像（直连失败时自动回退国内加速源），并自动重建当前容器。配置、凭证与日志卷均会保留，期间页面会短暂断开几秒。`
+    : `将拉取 GitHub 最新提交${remoteSha ? `（${remoteSha}）` : ""}，如有依赖变动会自动同步，完成后服务将自动重启并刷新页面。`;
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = `
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="updateConfirmTitle">
+        <div class="modal-head">
+          <div>
+            <h2 id="updateConfirmTitle">${escapeHtml(title)}</h2>
+            <p>${escapeHtml(desc)}</p>
+          </div>
+          <button class="ghost icon-only" type="button" data-modal-cancel title="关闭">
+            <svg><use href="#i-x"></use></svg>
+          </button>
+        </div>
+        ${!hasUpdate ? '<p class="task-note">当前检测显示已是最新版本，确认仍要重新拉取吗？</p>' : ""}
+        <div class="modal-actions">
+          <button class="ghost" type="button" data-modal-cancel>取消</button>
+          <button class="primary" type="button" data-modal-confirm>
+            <svg><use href="#i-download"></use></svg>
+            <span>确认更新</span>
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.insertBefore(overlay, document.querySelector(".toast"));
+    const finish = (value) => {
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.querySelectorAll("[data-modal-cancel]").forEach((el) => {
+      el.addEventListener("click", () => finish(false));
+    });
+    overlay.querySelector("[data-modal-confirm]")?.addEventListener("click", () => finish(true));
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) finish(false);
+    });
+    overlay.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") finish(false);
+    });
+  });
+}
+
+async function applyUpdate() {
+  if (updateBusy || updateState?.running) return;
+  const mode = updateState?.local?.mode || "source";
+  const hasUpdate = Boolean(updateState?.check?.has_update);
+  const remoteSha = updateState?.check?.remote?.short_commit || "";
+  const ok = await confirmUpdateDialog(mode, hasUpdate, remoteSha);
+  if (!ok) return;
+
+  updateBusy = "apply";
+  updateError = "";
+  renderUpdatePanel();
+  try {
+    const mirrors = currentUpdateMirrorDraft();
+    const data = await api("/api/update/apply", {
+      method: "POST",
+      body: JSON.stringify({ ...mirrors, force: !hasUpdate }),
+    });
+    updateState = data;
+    showToast(mode === "docker" ? "开始拉取最新镜像…" : "开始拉取最新代码…");
+    startUpdatePolling();
+  } catch (error) {
+    updateError = error.message;
+    showToast(`启动更新失败：${error.message}`);
+  } finally {
+    updateBusy = "";
+    renderUpdatePanel();
+    updateTopbarBadge();
+  }
+}
+
+function startUpdatePolling() {
+  if (updatePollTimer) return;
+  updatePollTimer = setInterval(async () => {
+    try {
+      const data = await api("/api/update/status");
+      updateState = data;
+      updateError = "";
+      renderUpdatePanel();
+      updateTopbarBadge();
+      if (data.status === "restarting") {
+        stopUpdatePolling();
+        waitForServerRestart();
+      } else if (!data.running) {
+        stopUpdatePolling();
+        if (data.status === "error") {
+          showToast(`更新失败：${data.message || "未知错误"}`);
+        } else if (data.message) {
+          showToast(data.message);
+        }
+      }
+    } catch {
+      // Docker 重建或本地重启期间连接中断属于正常现象，转入重启等待
+      stopUpdatePolling();
+      waitForServerRestart();
+    }
+  }, 1500);
+}
+
+function stopUpdatePolling() {
+  if (updatePollTimer) {
+    clearInterval(updatePollTimer);
+    updatePollTimer = null;
+  }
+}
+
+function waitForServerRestart() {
+  if (updateRestartTimer) return;
+  showToast("服务正在重启，恢复后将自动刷新页面…");
+  let attempts = 0;
+  const maxAttempts = 60;
+  const probe = async () => {
+    attempts += 1;
+    try {
+      const resp = await fetch("/api/auth/status", { cache: "no-store" });
+      if (resp.ok) {
+        updateRestartTimer = null;
+        showToast("更新完成，正在刷新页面…");
+        if (typeof window !== "undefined" && window.location?.reload) {
+          window.location.reload();
+        }
+        return;
+      }
+    } catch {
+      // 重启中继续等待
+    }
+    if (attempts < maxAttempts) {
+      updateRestartTimer = setTimeout(probe, 1500);
+    } else {
+      updateRestartTimer = null;
+      showToast("等待服务恢复超时，请手动刷新页面查看状态");
+    }
+  };
+  updateRestartTimer = setTimeout(probe, 3000);
+}
+
+function openUpdatePanel() {
+  switchView("dashboard");
+  const panel = document.querySelector('details.panel[data-panel="update"]');
+  if (panel) {
+    panel.open = true;
+    panel.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+  }
+}
+
+function copyUpdateManualCommand() {
+  const cmd = updateState?.manual_command || updateState?.check?.manual_command || "";
+  if (!cmd) return;
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    navigator.clipboard
+      .writeText(cmd)
+      .then(() => showToast("已复制更新命令"))
+      .catch(() => showToast("复制失败，请手动选中复制"));
+  } else {
+    showToast("请手动选中上方命令复制");
+  }
+}
+
+function bindUpdateEvents() {
+  const badgeBtn = $("updateBadgeBtn");
+  if (badgeBtn) {
+    badgeBtn.addEventListener("click", () => openUpdatePanel());
+  }
+  document.addEventListener("click", (event) => {
+    const button = event.target?.closest?.("[data-update-action]");
+    if (!button || button.disabled) return;
+    const action = button.dataset.updateAction;
+    if (action === "check") checkForUpdate();
+    else if (action === "apply") applyUpdate();
+    else if (action === "copy-cmd") copyUpdateManualCommand();
+  });
+}
+
 function bindEvents() {
   bindDeviceEvents();
+  bindUpdateEvents();
   document.querySelectorAll("summary button, summary input")
       .forEach((control) => {
         control.addEventListener("click", (event) => event.stopPropagation());

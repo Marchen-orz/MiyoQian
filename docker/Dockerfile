@@ -2,11 +2,17 @@ FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
+ARG BUILD_COMMIT=""
+ARG BUILD_DATE=""
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_LINK_MODE=copy \
-    PATH="/opt/venv/bin:${PATH}"
+    PATH="/opt/venv/bin:${PATH}" \
+    MIYOUQIAN_IN_DOCKER=1 \
+    MIYOUQIAN_BUILD_COMMIT="${BUILD_COMMIT}" \
+    MIYOUQIAN_BUILD_DATE="${BUILD_DATE}"
 
 # 安装固定版本 uv，避免 latest 变化导致构建结果不可预测
 COPY --from=ghcr.io/astral-sh/uv:0.7.3 /uv /usr/local/bin/uv

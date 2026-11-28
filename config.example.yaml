@@ -60,6 +60,11 @@ web:
   password: ""        # Web 控制台访问密码；监听外网时必须认证
                       # 留空表示未设置，首次访问通过页面设置（至少 8 位）；密码哈希会自动保存到此字段
 
+update:
+  check_on_start: true   # 启动 Web 控制台时自动检查 GitHub 最新提交
+  github_mirror: ""      # 选填，自定义 GitHub 加速前缀（留空时直连失败自动回退内置加速源）
+  ghcr_mirror: ""        # 选填，自定义 GHCR 镜像加速域名（留空时直连失败自动回退 ghcr.nju.edu.cn）
+
 games:
   enabled:
     - genshin

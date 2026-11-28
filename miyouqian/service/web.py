@@ -9,8 +9,11 @@ import hashlib
 import io
 import json
 import mimetypes
+import os
 import pathlib
 import secrets
+import subprocess
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -25,6 +28,7 @@ import qrcode
 from ..auth.login import AigisRequired, CaptchaLogin, QRLogin, _QrRefreshed
 from ..core import cookies
 from ..core import device as devicelib
+from ..core import updater as updaterlib
 from ..core.config import (
     PUSH_CHANNEL_DEFAULTS,
     PUSH_CHANNEL_FIELDS,
@@ -128,6 +132,15 @@ class WebApp:
         self._sessions: dict[str, float] = {}
         # uid -> (过期时间, 头像地址)，空地址表示这次没取到
         self._avatar_cache: dict[str, tuple[float, str]] = {}
+        self.update_state: dict[str, Any] = {
+            "running": False,
+            "status": "idle",
+            "message": "",
+            "check": None,
+            "result": None,
+        }
+        self._server: ThreadingHTTPServer | None = None
+        self._restart_requested = False
 
     def _ensure_password_hashed(self) -> None:
         web = self.config.get("web", {})
@@ -194,6 +207,25 @@ class WebApp:
     def start(self) -> None:
         self.scheduler.start()
         self.exchange_scheduler.start()
+        if (self.config.get("update") or {}).get("check_on_start", True):
+            threading.Thread(
+                target=self._startup_update_check,
+                name="miyouqian-update-check",
+                daemon=True,
+            ).start()
+
+    def _startup_update_check(self) -> None:
+        time.sleep(2.0)
+        try:
+            info = self.check_update(silent=True)
+            if info.get("has_update"):
+                remote = info.get("remote") or {}
+                self.log(
+                    f"检测到新版本 {remote.get('short_commit', '')}（{remote.get('commit_message', '')}），可在「版本更新」面板一键更新",
+                    "update",
+                )
+        except Exception as exc:
+            self.log(f"启动检查更新失败: {exc}", "update")
 
     def stop(self) -> None:
         self.scheduler.stop()
@@ -274,6 +306,9 @@ class WebApp:
         if not isinstance(payload, dict):
             raise ValueError("配置必须是 JSON 对象")
         normalize_config(payload)
+        update_cfg = payload.get("update") or {}
+        update_cfg["github_mirror"] = updaterlib.normalize_github_mirror(update_cfg.get("github_mirror", ""))
+        update_cfg["ghcr_mirror"] = updaterlib.normalize_ghcr_mirror(update_cfg.get("ghcr_mirror", ""))
         validate_unique_account_uids(payload)
         with self.lock:
             old_config = copy.deepcopy(self.config)
@@ -1131,6 +1166,140 @@ class WebApp:
         self._qq_bind_cancel.set()
         self.log("已请求取消 QQ OpenID 绑定", "push")
 
+    # -----------------------------------------------------------------------
+    # 检查更新与自动更新
+    # -----------------------------------------------------------------------
+    def _update_mirrors(self, payload: dict[str, Any] | None = None) -> tuple[str, str]:
+        with self.lock:
+            cfg = copy.deepcopy(self.config.get("update") or {})
+        raw_gh = payload.get("github_mirror") if isinstance(payload, dict) and "github_mirror" in payload else cfg.get("github_mirror", "")
+        raw_ghcr = payload.get("ghcr_mirror") if isinstance(payload, dict) and "ghcr_mirror" in payload else cfg.get("ghcr_mirror", "")
+        return updaterlib.normalize_github_mirror(str(raw_gh or "")), updaterlib.normalize_ghcr_mirror(str(raw_ghcr or ""))
+
+    def update_status(self) -> dict[str, Any]:
+        with self.lock:
+            state = copy.deepcopy(self.update_state)
+            cfg = copy.deepcopy(self.config.get("update") or {})
+        local = updaterlib.get_local_version()
+        state["local"] = local
+        state["config"] = cfg
+        state["manual_command"] = (
+            updaterlib.build_docker_manual_command(
+                local.get("image") or updaterlib.GHCR_DEFAULT_IMAGE,
+                ghcr_mirror=str(cfg.get("ghcr_mirror") or ""),
+            )
+            if local.get("mode") == "docker"
+            else ""
+        )
+        return state
+
+    def check_update(self, payload: dict[str, Any] | None = None, *, silent: bool = False) -> dict[str, Any]:
+        gh_mirror, ghcr_mirror = self._update_mirrors(payload)
+        if not silent:
+            self.log("正在检查 GitHub 最新提交…", "update")
+        info = updaterlib.check_for_updates(github_mirror=gh_mirror, ghcr_mirror=ghcr_mirror)
+        with self.lock:
+            self.update_state["check"] = info
+            if not self.update_state.get("running") and self.update_state.get("status") not in ("restarting",):
+                self.update_state["status"] = "checked"
+                self.update_state["message"] = (
+                    f"发现新版本 {info['remote']['short_commit']}" if info["has_update"] else "当前已是最新版本"
+                )
+        if not silent:
+            remote = info["remote"]
+            if info["has_update"]:
+                self.log(f"检查更新完成：发现新提交 {remote['short_commit']}（来源：{remote['source']}）", "update")
+            else:
+                self.log(f"检查更新完成：当前已是最新版本（{remote['short_commit']}，来源：{remote['source']}）", "update")
+        return info
+
+    def start_update(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        gh_mirror, ghcr_mirror = self._update_mirrors(payload)
+        force = bool(payload.get("force")) if isinstance(payload, dict) else False
+        if self.scheduler.status().get("running"):
+            raise RuntimeError("签到任务正在运行，请等待完成后再更新")
+        if self.exchange_scheduler.status().get("running_plans"):
+            raise RuntimeError("有兑换计划正在执行，请等待完成后再更新")
+        with self.lock:
+            if self.update_state.get("running"):
+                raise RuntimeError("更新正在进行中，请勿重复操作")
+            self.update_state.update(
+                {
+                    "running": True,
+                    "status": "updating",
+                    "message": "准备开始更新…",
+                    "result": None,
+                }
+            )
+        threading.Thread(
+            target=self._update_worker,
+            args=(gh_mirror, ghcr_mirror, force),
+            name="miyouqian-updater",
+            daemon=True,
+        ).start()
+        self.log("开始执行版本更新", "update")
+        return self.update_status()
+
+    def _update_worker(self, gh_mirror: str, ghcr_mirror: str, force: bool) -> None:
+        def on_progress(message: str) -> None:
+            with self.lock:
+                self.update_state["message"] = message
+            self.log(message, "update")
+
+        try:
+            result = updaterlib.apply_update(
+                github_mirror=gh_mirror,
+                ghcr_mirror=ghcr_mirror,
+                force=force,
+                on_progress=on_progress,
+            )
+        except Exception as exc:
+            with self.lock:
+                self.update_state.update(
+                    {
+                        "running": False,
+                        "status": "error",
+                        "message": str(exc),
+                        "result": None,
+                    }
+                )
+            self.log(f"更新失败: {exc}", "update")
+            return
+
+        if result.get("updated") and result.get("restart_required"):
+            restart_msg = (
+                result["message"]
+                if result.get("mode") == "docker"
+                else f"{result['message']}，正在重启服务…"
+            )
+            with self.lock:
+                self.update_state.update(
+                    {
+                        "running": False,
+                        "status": "restarting",
+                        "message": restart_msg,
+                        "result": result,
+                    }
+                )
+            self.log(restart_msg, "update")
+            if result.get("mode") != "docker" and self._server is not None:
+                # 留一点时间让前端轮询拿到 restarting 状态，再优雅停服并拉起新进程
+                time.sleep(1.5)
+                self._restart_requested = True
+                self._server.shutdown()
+            return
+
+        with self.lock:
+            self.update_state.update(
+                {
+                    "running": False,
+                    "status": "success",
+                    "message": result.get("message") or "更新完成",
+                    "result": result,
+                }
+            )
+        self.log(result.get("message") or "更新完成", "update")
+
 
 def make_qr_data_uri(text: str) -> str:
     image = qrcode.make(text)
@@ -1405,6 +1574,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/qqbot/bind/status":
                 self.send_json(self.app.qq_bind_status())
                 return
+            if path == "/api/update/status":
+                self.send_json(self.app.update_status())
+                return
             self.serve_static(path)
         except Exception as exc:
             self.send_error_json(str(exc), HTTPStatus.INTERNAL_SERVER_ERROR)
@@ -1452,6 +1624,14 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/qqbot/bind/cancel":
                 self.app.cancel_qq_bind()
                 self.send_json({"ok": True})
+                return
+            if path == "/api/update/check":
+                info = self.app.check_update(payload)
+                self.send_json({"ok": True, **self.app.update_status(), "check": info})
+                return
+            if path == "/api/update/apply":
+                state = self.app.start_update(payload)
+                self.send_json({"ok": True, **state})
                 return
             if path == "/api/run":
                 self.app.log("收到手动执行请求", "web")
@@ -1641,6 +1821,7 @@ def serve(config_path: pathlib.Path, host: str, port: int) -> None:
         app.log("您设置了监听外网，访问 Web 控制台时将校验外网访问密码，请您妥善设置并保管外网访问密码！", "auth")
     server, actual_port = create_server(host, port)
     app.port = actual_port
+    app._server = server
     if actual_port != port:
         app.log(f"端口 {port} 被占用，已切换到 {actual_port}", "startup")
     app.start()
@@ -1663,6 +1844,13 @@ def serve(config_path: pathlib.Path, host: str, port: int) -> None:
         app.stop()
         server.server_close()
         app.log("Web 控制台已停止", "startup")
+
+    if app._restart_requested:
+        app.log("正在重新启动米游签进程以加载新版本…", "update")
+        if os.name == "posix":
+            os.execv(sys.executable, [sys.executable, *sys.argv])
+        else:
+            subprocess.Popen([sys.executable, *sys.argv], close_fds=True)
 
 
 def create_server(host: str, port: int) -> tuple[ThreadingHTTPServer, int]:

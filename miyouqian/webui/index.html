@@ -56,6 +56,11 @@
         <circle cx="12" cy="8" r="4"></circle>
         <path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"></path>
       </symbol>
+      <symbol id="i-download" viewBox="0 0 24 24">
+        <path d="M12 3v12"></path>
+        <path d="m7 10 5 5 5-5"></path>
+        <path d="M5 20h14"></path>
+      </symbol>
     </svg>
 
     <main class="shell">
@@ -88,6 +93,15 @@
           </button>
         </div>
         <div class="actions" data-view-actions="dashboard">
+          <button
+            class="accent update-badge-btn is-hidden"
+            id="updateBadgeBtn"
+            type="button"
+            title="发现新版本，点击查看更新"
+          >
+            <svg><use href="#i-download"></use></svg>
+            <span id="updateBadgeText">有新版本</span>
+          </button>
           <button class="ghost" id="refreshBtn" type="button" title="刷新">
             <svg><use href="#i-refresh"></use></svg>
             <span>刷新</span>
@@ -225,6 +239,17 @@
                 </label>
               </div>
               <div class="push-channel-list" id="captchaChannels"></div>
+            </details>
+
+            <details class="panel" data-panel="update">
+              <summary>
+                <span>
+                  <strong>版本更新</strong>
+                  <small id="updateSummaryNote">检测 GitHub 最新提交与一键更新</small>
+                </span>
+                <span class="disclosure" aria-hidden="true"></span>
+              </summary>
+              <div id="updatePanel" class="update-panel"></div>
             </details>
           </div>
 

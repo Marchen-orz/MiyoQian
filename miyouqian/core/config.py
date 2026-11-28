@@ -71,6 +71,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "port": 5890,
         "password": "",
     },
+    "update": {
+        "check_on_start": True,
+        "github_mirror": "",
+        "ghcr_mirror": "",
+    },
 }
 
 
@@ -158,6 +163,13 @@ def normalize_config(config: dict[str, Any]) -> None:
     web.setdefault("host", "127.0.0.1")
     web.setdefault("port", 5890)
     web.setdefault("password", "")
+    update_cfg = config.setdefault("update", {})
+    if not isinstance(update_cfg, dict):
+        update_cfg = {}
+        config["update"] = update_cfg
+    update_cfg["check_on_start"] = parse_bool(update_cfg.get("check_on_start", True))
+    update_cfg["github_mirror"] = str(update_cfg.get("github_mirror") or "").strip()
+    update_cfg["ghcr_mirror"] = str(update_cfg.get("ghcr_mirror") or "").strip()
     features = config.setdefault("features", {})
     features.setdefault("game_checkin", True)
     features.setdefault("cloud_game_checkin", False)

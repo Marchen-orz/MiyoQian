@@ -1325,6 +1325,150 @@ textarea:focus {
   font-size: 12px;
 }
 
+/* 版本更新面板与顶栏提示 */
+.update-badge-btn {
+  min-height: 40px;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.update-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.update-panel > .task-note {
+  margin: 0;
+}
+
+.update-muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.update-commit-msg {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.update-link {
+  color: var(--primary-strong);
+  text-decoration: none;
+}
+
+.update-link:hover {
+  text-decoration: underline;
+}
+
+.update-commits {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  font-size: 12px;
+}
+
+.update-commits ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 5px;
+}
+
+.update-commits li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.update-commits li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.update-status {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  border: 1px solid var(--line);
+  background: var(--panel-soft);
+}
+
+.update-status.ok {
+  color: var(--ok);
+  border-color: #bce5d4;
+  background: #f1fbf6;
+}
+
+.update-status.info {
+  color: var(--primary-strong);
+  border-color: #bddcff;
+  background: var(--primary-soft);
+}
+
+.update-status.error {
+  color: var(--danger);
+  border-color: #f0c9cf;
+  background: #fff3f5;
+}
+
+.update-command-box {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  font-size: 12px;
+}
+
+.update-command-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.update-command-head button {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.update-command-box pre {
+  margin: 0;
+  padding: 10px;
+  border-radius: 6px;
+  background: #0d1d32;
+  color: #dcecff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.update-settings {
+  display: grid;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.update-settings > .task-note {
+  margin: 0;
+}
+
 /* 列表末尾的「添加账号」卡片 */
 .acc-add-card {
   display: flex;

@@ -51,6 +51,12 @@ def build_parser() -> argparse.ArgumentParser:
     serve_parser.add_argument("--port", type=int, default=None, help="监听端口，默认读取配置文件")
 
     subparsers.add_parser("show", help="显示当前启用配置摘要")
+
+    update_parser = subparsers.add_parser("update", help="检查并更新到 GitHub 最新版本")
+    update_parser.add_argument("--check", action="store_true", help="仅检查更新，不执行拉取")
+    update_parser.add_argument("--force", action="store_true", help="强制拉取更新（即使本地已是最新）")
+    update_parser.add_argument("--mirror", default="", help="临时指定 GitHub 加速前缀，例如 https://gh-proxy.org/")
+    update_parser.add_argument("--ghcr-mirror", default="", help="临时指定 GHCR 镜像加速域名，例如 ghcr.nju.edu.cn")
     return parser
 
 
@@ -69,6 +75,14 @@ def main(argv: list[str] | None = None) -> int:
             return command_serve(config_path, args.host, args.port)
         if args.command == "show":
             return command_show(config_path)
+        if args.command == "update":
+            return command_update(
+                config_path,
+                check_only=args.check,
+                force=args.force,
+                github_mirror=args.mirror,
+                ghcr_mirror=args.ghcr_mirror,
+            )
     except Exception as exc:
         print(f"[错误] {exc}", file=sys.stderr)
         return 1
@@ -190,6 +204,59 @@ def command_show(config_path: pathlib.Path) -> int:
     print(f"日志文件: {log_path(config_path, config).resolve()}")
     web = config.get("web", {})
     print(f"Web 控制台（配置文件中的值，启动时可被命令行参数覆盖）: {web.get('host', '127.0.0.1')}:{web.get('port', 5890)}")
+    return 0
+
+
+def command_update(
+    config_path: pathlib.Path,
+    *,
+    check_only: bool = False,
+    force: bool = False,
+    github_mirror: str = "",
+    ghcr_mirror: str = "",
+) -> int:
+    from .core.updater import apply_update, check_for_updates
+
+    config = load_config(config_path)
+    update_cfg = config.get("update", {}) if isinstance(config.get("update"), dict) else {}
+    effective_gh_mirror = github_mirror or str(update_cfg.get("github_mirror") or "")
+    effective_ghcr_mirror = ghcr_mirror or str(update_cfg.get("ghcr_mirror") or "")
+
+    info = check_for_updates(github_mirror=effective_gh_mirror, ghcr_mirror=effective_ghcr_mirror)
+    local = info["local"]
+    remote = info["remote"]
+    mode_label = {"docker": "Docker 容器", "git": "Git 源码部署", "source": "源码包部署"}.get(local["mode"], local["mode"])
+    print(f"部署方式: {mode_label}")
+    print(f"当前提交: {local['short_commit'] or '未知'}")
+    print(f"最新提交: {remote['short_commit']} ({remote['commit_time'] or '-'}) [{remote['source']}]")
+    if remote.get("commit_message"):
+        print(f"提交说明: {remote['commit_message']}")
+
+    if not info["has_update"] and not force:
+        print("当前已是最新版本。")
+        return 0
+
+    if info["new_commits"]:
+        print("最近新增提交:")
+        for item in info["new_commits"][:5]:
+            print(f"  - {item['short_sha']} {item['message']}")
+
+    if check_only:
+        print("发现新版本，可运行 `python main.py update` 执行更新。")
+        if local["mode"] == "docker" and not local.get("docker_socket_available"):
+            print("提示: 当前容器未挂载 /var/run/docker.sock，请在宿主机执行:")
+            print(info["manual_command"])
+        return 0
+
+    result = apply_update(
+        github_mirror=effective_gh_mirror,
+        ghcr_mirror=effective_ghcr_mirror,
+        force=force,
+        on_progress=lambda msg: print(f"[更新] {msg}"),
+    )
+    print(result["message"])
+    if result.get("updated") and local["mode"] != "docker":
+        print("请重新启动程序以加载新版本。")
     return 0
 
 

@@ -314,6 +314,10 @@ docker run -d --name miyouqian --restart unless-stopped --init \
 docker compose pull && docker compose up -d
 ```
 
+> 国内直连 `ghcr.io` 失败时，可将 `docker-compose.yml` 中的 `image:` 替换为南京大学镜像源 `ghcr.nju.edu.cn/marchen-orz/miyouqian:latest`。
+>
+> `docker-compose.image.yml` 默认挂载了 `/var/run/docker.sock`，可直接在 Web 控制台「版本更新」面板（或命令行 `python main.py update`）检测 GitHub 最新提交并一键拉取新镜像、自动重建容器（拉取失败时会自动回退国内加速源）；如不需要容器内自动更新，注释掉 `/var/run/docker.sock` 挂载行即可。
+
 配置、凭证和日志都在 `miyouqian_state` 卷里，更新镜像不会丢。可用的标签：
 
 | 标签 | 说明 |
