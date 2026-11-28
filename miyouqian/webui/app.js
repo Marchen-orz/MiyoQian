@@ -121,11 +121,14 @@ const ACCOUNTS_VISIBLE = 3;      // 账号栏最多同时露出几个账号，�
 const PANEL_STATE_KEY = "miyouqian.panels";
 const GITHUB_REPO_URL = "https://github.com/Marchen-orz/MiyoQian";
 const STAR_PROMPT_KEY = "miyouqian.starPrompt";
-const STAR_INITIAL_DELAY_MS = 3 * 24 * 60 * 60 * 1000; // 首次使用满 3 天后提示
-const STAR_SNOOZE_MS = 14 * 24 * 60 * 60 * 1000;       // 稍后再说后 14 天再提示一次
-const STAR_SESSION_DELAY_MS = 8 * 1000;                // 打开页面后稍等几秒再弹出，避免打断首屏操作
+const STAR_FIRST_CHECKIN_DELAY_MS = 1500;           // 首次执行签到完成后延迟 1.5 秒弹出
+const STAR_REVISIT_DELAY_MS = 30 * 1000;            // 后续下次进入管理界面延迟 30 秒弹出
+const STAR_MIN_REVISIT_GAP_MS = 5 * 60 * 1000;      // 防抖：刚关闭后短时间内刷新页面不重复弹
 let starPromptTimer = null;
-let starPromptInterval = null;
+let starPromptShownThisVisit = false;
+let starPromptStatusInitialized = false;
+let lastSchedulerRunning = false;
+let lastSchedulerRunAt = "";
 const LOG_PANEL_GAP = 24;        // 日志栏贴着窗口底部时留的边距
 const LOG_PANEL_TOP = 16;        // 同 CSS 里 .side-column 的 sticky top
 let logFitQueued = false;
@@ -2163,6 +2166,7 @@ async function refreshStatus() {
     }
   }
   lastLoginStatus = login.status || "";
+  observeCheckinForStarPrompt(scheduler);
 }
 
 function isEditingShopConfig() {
@@ -4044,14 +4048,26 @@ function bindUpdateEvents() {
 // GitHub Star 引导弹窗
 // ---------------------------------------------------------------------------
 function readStarPromptState() {
-  if (typeof localStorage === "undefined") return null;
+  if (typeof localStorage === "undefined") {
+    return { hasRunCheckin: false, shownCount: 0, lastShownAt: 0, dismissed: false };
+  }
   try {
     const raw = localStorage.getItem(STAR_PROMPT_KEY);
-    if (!raw) return null;
+    if (!raw) {
+      return { hasRunCheckin: false, shownCount: 0, lastShownAt: 0, dismissed: false };
+    }
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : null;
+    if (!parsed || typeof parsed !== "object") {
+      return { hasRunCheckin: false, shownCount: 0, lastShownAt: 0, dismissed: false };
+    }
+    return {
+      hasRunCheckin: Boolean(parsed.hasRunCheckin),
+      shownCount: Number(parsed.shownCount) || 0,
+      lastShownAt: Number(parsed.lastShownAt) || 0,
+      dismissed: Boolean(parsed.dismissed),
+    };
   } catch {
-    return null;
+    return { hasRunCheckin: false, shownCount: 0, lastShownAt: 0, dismissed: false };
   }
 }
 
@@ -4064,31 +4080,79 @@ function writeStarPromptState(state) {
   }
 }
 
-function evaluateStarPrompt(now = Date.now()) {
-  const saved = readStarPromptState();
-  if (!saved || !Number.isFinite(Number(saved.firstSeenAt))) {
-    writeStarPromptState({
-      firstSeenAt: now,
-      lastShownAt: 0,
-      snoozedUntil: 0,
-      dismissed: false,
-    });
+function canShowStarPromptOnRevisit(now = Date.now()) {
+  if (starPromptShownThisVisit) return false;
+  const state = readStarPromptState();
+  if (state.dismissed) return false;
+  if (!state.hasRunCheckin) return false;
+  if (state.lastShownAt && now - state.lastShownAt < STAR_MIN_REVISIT_GAP_MS) {
     return false;
   }
-  if (saved.dismissed) return false;
-  if (now - Number(saved.firstSeenAt) < STAR_INITIAL_DELAY_MS) return false;
-  if (saved.snoozedUntil && now < Number(saved.snoozedUntil)) return false;
-  if (saved.lastShownAt && now - Number(saved.lastShownAt) < STAR_SNOOZE_MS) return false;
   return true;
+}
+
+function queueStarPrompt(delayMs, reason = "revisit") {
+  if (starPromptShownThisVisit || starPromptTimer) return;
+  const state = readStarPromptState();
+  if (state.dismissed) return;
+  starPromptTimer = setTimeout(() => {
+    starPromptTimer = null;
+    if (starPromptShownThisVisit) return;
+    const latest = readStarPromptState();
+    if (latest.dismissed) return;
+    if (reason === "revisit" && !canShowStarPromptOnRevisit()) return;
+    if (!showStarPromptModal()) {
+      // 当前有其他弹窗或登录遮罩打开时稍后再试，避免叠层打断用户操作
+      queueStarPrompt(10 * 1000, reason);
+    }
+  }, delayMs);
+}
+
+function observeCheckinForStarPrompt(scheduler) {
+  const running = Boolean(scheduler?.running);
+  const lastRun = String(scheduler?.last_run || "");
+  const lastError = String(scheduler?.last_error || "");
+  const justFinished =
+    starPromptStatusInitialized &&
+    !running &&
+    (lastSchedulerRunning || (Boolean(lastRun) && lastRun !== lastSchedulerRunAt));
+
+  if (!starPromptStatusInitialized) {
+    starPromptStatusInitialized = true;
+    // 若后台早已执行过签到（例如老用户升级后打开管理界面），同样纳入下次进入延迟提醒
+    if (lastRun && !running) {
+      const state = readStarPromptState();
+      if (!state.hasRunCheckin) {
+        writeStarPromptState({ ...state, hasRunCheckin: true });
+      }
+      if (canShowStarPromptOnRevisit()) {
+        queueStarPrompt(STAR_REVISIT_DELAY_MS, "revisit");
+      }
+    }
+  } else if (justFinished && !lastError) {
+    const state = readStarPromptState();
+    if (!state.hasRunCheckin) {
+      writeStarPromptState({ ...state, hasRunCheckin: true });
+    }
+    if (!state.dismissed && !starPromptShownThisVisit && state.shownCount === 0) {
+      queueStarPrompt(STAR_FIRST_CHECKIN_DELAY_MS, "first_checkin");
+    }
+  }
+
+  lastSchedulerRunning = running;
+  lastSchedulerRunAt = lastRun;
 }
 
 function showStarPromptModal(now = Date.now()) {
   if (document.querySelector(".modal-overlay") || document.getElementById("authOverlay")) {
     return false;
   }
-  const current = readStarPromptState() || { firstSeenAt: now, dismissed: false };
+  starPromptShownThisVisit = true;
+  const current = readStarPromptState();
   writeStarPromptState({
     ...current,
+    hasRunCheckin: true,
+    shownCount: current.shownCount + 1,
     lastShownAt: now,
   });
 
@@ -4112,7 +4176,7 @@ function showStarPromptModal(now = Date.now()) {
         </button>
       </div>
       <p class="star-modal-body">
-        如果你已经用了一段时间、签到和兑换帮到了你，点个 Star 就是对项目持续适配新接口和维护的最大鼓励。
+        如果签到或兑换功能帮到了你，点个 Star 就是对项目持续维护和适配新接口的最大鼓励。
       </p>
       <div class="star-modal-actions">
         <button class="star-modal-dismiss" type="button" data-star-action="dismiss">
@@ -4137,13 +4201,13 @@ function showStarPromptModal(now = Date.now()) {
   document.body.insertBefore(overlay, document.querySelector(".toast"));
 
   const closeWith = (mode) => {
-    const latest = readStarPromptState() || { firstSeenAt: now };
+    const latest = readStarPromptState();
     const ts = Date.now();
     if (mode === "go" || mode === "dismiss") {
-      writeStarPromptState({ ...latest, lastShownAt: ts, snoozedUntil: 0, dismissed: true });
+      writeStarPromptState({ ...latest, lastShownAt: ts, dismissed: true });
       showToast(mode === "go" ? "感谢支持！欢迎在 GitHub 点亮 Star" : "感谢支持，后续不再提示");
     } else {
-      writeStarPromptState({ ...latest, lastShownAt: ts, snoozedUntil: ts + STAR_SNOOZE_MS, dismissed: false });
+      writeStarPromptState({ ...latest, lastShownAt: ts, dismissed: false });
     }
     overlay.remove();
   };
@@ -4165,20 +4229,8 @@ function scheduleStarPrompt() {
     clearTimeout(starPromptTimer);
     starPromptTimer = null;
   }
-  if (evaluateStarPrompt()) {
-    starPromptTimer = setTimeout(() => {
-      starPromptTimer = null;
-      if (evaluateStarPrompt()) {
-        showStarPromptModal();
-      }
-    }, STAR_SESSION_DELAY_MS);
-  }
-  if (!starPromptInterval) {
-    starPromptInterval = setInterval(() => {
-      if (evaluateStarPrompt()) {
-        showStarPromptModal();
-      }
-    }, 60 * 60 * 1000);
+  if (canShowStarPromptOnRevisit()) {
+    queueStarPrompt(STAR_REVISIT_DELAY_MS, "revisit");
   }
 }
 
